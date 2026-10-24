@@ -10,6 +10,8 @@
 
 // 会改变服务端状态的命令：同一命令+相同参数在途时拒绝重复提交（防双击/短时间重复点击）
 static const QSet<QString> kWriteCmds = {
+    cs::cmd::Register, cs::cmd::UpdateContact, cs::cmd::ChangePassword,
+    cs::cmd::MessageMarkRead, cs::cmd::MessageReadAll, cs::cmd::ContactAdmin,
 };
 
 ClientConnector::ClientConnector(QObject *parent)

@@ -25,6 +25,11 @@ namespace {
 bool isReadOnlyCommand(const QString &cmd)
 {
     static const QSet<QString> kReadOnly = {
+        cs::cmd::Login,            // 仅校验密码 + 内存发 token
+        cs::cmd::Self,
+        cs::cmd::UserGet,
+        cs::cmd::MessageList,
+        cs::cmd::MessageUnread,
     };
     return kReadOnly.contains(cmd);
 }
@@ -115,7 +120,9 @@ void ClientConnection::handleFrame(cs::FrameType type, const QByteArray &payload
 
     // 解析出有效会话的用户，注册到推送表（每个请求都带 token，顺带刷新归属）
     int sessUid = 0;
-
+    if (Dispatcher::instance().tokenUserId(token, sessUid) && sessUid > 0) {
+        PushRegistry::instance().registerConn(sessUid, this);
+    }
 
     {
         // 常规命令：读命令持读锁（多连接可并发查询），写命令持写锁（全局独占）。
