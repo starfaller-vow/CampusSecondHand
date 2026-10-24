@@ -1,0 +1,10 @@
+/.vs/
+/build/
+/out/
+/.git/
+*.user
+*.db
+*.db-wal
+*.db-shm
+/images/
+/image_cache/
