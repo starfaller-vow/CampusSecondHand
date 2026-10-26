@@ -12,6 +12,8 @@
 static const QSet<QString> kWriteCmds = {
     cs::cmd::Register, cs::cmd::UpdateContact, cs::cmd::ChangePassword,
     cs::cmd::MessageMarkRead, cs::cmd::MessageReadAll, cs::cmd::ContactAdmin,
+    cs::cmd::RedeemGenerate, cs::cmd::Redeem, cs::cmd::SettingsSet,
+    cs::cmd::CategoryAdd, cs::cmd::CategoryUpdate, cs::cmd::CategoryRemove,
 };
 
 ClientConnector::ClientConnector(QObject *parent)

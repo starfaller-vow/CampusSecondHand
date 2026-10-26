@@ -12,7 +12,10 @@
 #include "DatabaseManager.h"
 #include "UserDAO.h"
 #include "UserManager.h"
+#include "CategoriesDAO.h"
 #include "MessagesDAO.h"
+#include "RedeemCodesDAO.h"
+#include "SettingsDAO.h"
 #include "../shared/PushRegistry.h"
 
 Dispatcher &Dispatcher::instance()
@@ -130,7 +133,13 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     // ==================== 公开数据 ====================
 
     // ---- 商品分类列表 ----
-
+    if (cmd == cs::cmd::ListCategories) {
+        QJsonArray arr;
+        for (const Category &c : CategoriesDAO::getAll()) {
+            arr.append(jsoncv::categoryToJson(c));
+        }
+        return QJsonObject{ {"categories", arr} };
+    }
 
     // ---- 商品浏览/搜索（无需登录，与单机版一致）----
 
@@ -275,16 +284,68 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
 
 
     // ---- 分类管理 ----
-
-
-
+    if (cmd == cs::cmd::CategoryAdd) {
+        Category c;
+        c.name      = p.value("name").toString().trimmed();
+        c.sortOrder = p.value("sortOrder").toInt();
+        if (!CategoriesDAO::insert(c, err)) return {};
+        return QJsonObject{};
+    }
+    if (cmd == cs::cmd::CategoryUpdate) {
+        Category c;
+        c.id        = p.value("id").toInt();
+        c.name      = p.value("name").toString().trimmed();
+        c.sortOrder = p.value("sortOrder").toInt();
+        if (!CategoriesDAO::update(c, err)) return {};
+        return QJsonObject{};
+    }
+    if (cmd == cs::cmd::CategoryRemove) {
+        if (!CategoriesDAO::remove(p.value("id").toInt(), err)) return {};
+        return QJsonObject{};
+    }
 
     // ---- 手续费/系数设置 ----
-
-
+    if (cmd == cs::cmd::SettingsGet) {
+        QJsonObject coef;
+        coef.insert("全新",     SettingsDAO::conditionCoef(QStringLiteral("全新")));
+        coef.insert("九成新",   SettingsDAO::conditionCoef(QStringLiteral("九成新")));
+        coef.insert("八成新",   SettingsDAO::conditionCoef(QStringLiteral("八成新")));
+        coef.insert("七成新",   SettingsDAO::conditionCoef(QStringLiteral("七成新")));
+        coef.insert("六成新及以下", SettingsDAO::conditionCoef(QStringLiteral("六成新及以下")));
+        return QJsonObject{
+            {"feeThreshold", SettingsDAO::feeThreshold()},
+            {"feeRate", SettingsDAO::feeRate()},
+            {"timeoutDays", SettingsDAO::transactionTimeoutDays()},
+            {"coef", coef}
+        };
+    }
+    if (cmd == cs::cmd::SettingsSet) {
+        if (p.contains("feeThreshold")) SettingsDAO::set(
+            "fee_threshold", QString::number(p.value("feeThreshold").toDouble()));
+        if (p.contains("feeRate")) SettingsDAO::set(
+            "fee_rate", QString::number(p.value("feeRate").toDouble()));
+        if (p.contains("timeoutDays")) SettingsDAO::set(
+            "transaction_timeout_days", QString::number(p.value("timeoutDays").toInt()));
+        if (p.contains("coef")) {
+            const QJsonObject coef = p.value("coef").toObject();
+            for (auto it = coef.begin(); it != coef.end(); ++it) {
+                SettingsDAO::set("coef_" + it.key(), QString::number(it.value().toDouble()));
+            }
+        }
+        return QJsonObject{};
+    }
 
     // ---- 充值码生成 ----
-
+    if (cmd == cs::cmd::RedeemGenerate) {
+        QStringList codes;
+        if (!RedeemCodesDAO::generateBatch(p.value("amount").toDouble(),
+                                           p.value("count").toInt(), codes, err)) {
+            return {};
+        }
+        QJsonArray arr;
+        for (const QString &c : codes) arr.append(c);
+        return QJsonObject{ {"codes", arr} };
+    }
 
     // ---- 举报处理 ----
 

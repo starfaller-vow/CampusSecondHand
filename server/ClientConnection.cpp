@@ -28,8 +28,10 @@ bool isReadOnlyCommand(const QString &cmd)
         cs::cmd::Login,            // 仅校验密码 + 内存发 token
         cs::cmd::Self,
         cs::cmd::UserGet,
+        cs::cmd::ListCategories,
         cs::cmd::MessageList,
         cs::cmd::MessageUnread,
+        cs::cmd::SettingsGet,
     };
     return kReadOnly.contains(cmd);
 }

@@ -376,6 +376,267 @@ void MainWindow::setupUI()
     m_tabWidget->addTab(m_tabProfile, QStringLiteral("👤 个人中心"));
     qDebug() << "[setupUI] Tab6 个人中心 完成";
 
+    // Tab 7: 管理员面板（仅管理员）
+    if (m_user.isAdmin()) {
+        qDebug() << "[setupUI] Tab7 管理员面板 开始";
+        m_tabAdmin = new QWidget();
+        auto *adminL = new QVBoxLayout(m_tabAdmin);
+        auto *adminTabs = new QTabWidget(m_tabAdmin);
+        adminL->addWidget(adminTabs);
+
+        // ===== 子Tab 2: 分类管理 =====
+        {
+            auto *page = new QWidget();
+            auto *l = new QVBoxLayout(page);
+            auto *btnBar = new QHBoxLayout();
+            auto *addBtn = new QPushButton(QStringLiteral("➕ 新增分类"));
+            auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新"));
+            btnBar->addWidget(addBtn);
+            btnBar->addWidget(refreshBtn);
+            btnBar->addStretch();
+            l->addLayout(btnBar);
+
+            auto *table = new QTableWidget(page);
+            table->setColumnCount(4);
+            table->setHorizontalHeaderLabels(QStringList{
+                QStringLiteral("ID"), QStringLiteral("名称"), QStringLiteral("排序"), QStringLiteral("操作")
+            });
+            table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+            table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            l->addWidget(table);
+
+            auto refreshCats = std::make_shared<std::function<void()>>();
+            *refreshCats = [this, table, refreshCats]() {
+                table->setRowCount(0);
+
+                // C/S：从服务端拉取全部分类
+                QJsonObject data;
+                QString err;
+                if (!ClientConnector::instance().request(cs::cmd::ListCategories, {}, data, err)) {
+                    QMessageBox::warning(this, QStringLiteral("失败"), err);
+                    return;
+                }
+                QList<Category> cats;
+                for (const auto &v : data.value("categories").toArray()) {
+                    cats.append(jsoncv::categoryFromJson(v.toObject()));
+                }
+
+                for (const auto &c : cats) {
+                    int row = table->rowCount();
+                    table->insertRow(row);
+                    table->setItem(row, 0, new QTableWidgetItem(QString::number(c.id)));
+                    table->setItem(row, 1, new QTableWidgetItem(c.name));
+                    table->setItem(row, 2, new QTableWidgetItem(QString::number(c.sortOrder)));// 第2列：排序号sortOrder，用于控制分类展示先后顺序
+                    // ========== 第3列【操作列】准备容器，放编辑、删除按钮 ==========
+                    auto *bw = new QWidget();
+                    auto *bl = new QHBoxLayout(bw);
+                    bl->setContentsMargins(2, 2, 2, 2);
+                    bl->setSpacing(4);
+
+                    auto *editBtn = new QPushButton(QStringLiteral("编辑"));
+                    editBtn->setStyleSheet("background:#2196F3;color:white;padding:2px 8px;border-radius:3px;");// 设置按钮样式：蓝色背景、白字、内边距、圆角
+                    connect(editBtn, &QPushButton::clicked, this, [this, c, refreshCats]() {
+                        bool ok;
+                        QString name = QInputDialog::getText(this, QStringLiteral("编辑分类"),
+                            QStringLiteral("分类名称："), QLineEdit::Normal, c.name, &ok);
+                        if (!ok || name.isEmpty()) return;// 如果用户点取消，或者输入的名称为空，直接退出，不执行更新
+                        int order = QInputDialog::getInt(this, QStringLiteral("编辑分类"),
+                            QStringLiteral("排序："), c.sortOrder, 0, 9999, 1, &ok);// 弹出数字输入框，修改排序号，默认值c.sortOrder；范围0~9999，步长1
+                        if (!ok) return;
+                        QJsonObject rdata;
+                        QString err;
+                        if (ClientConnector::instance().request(cs::cmd::CategoryUpdate, QJsonObject{
+                                {"id", c.id}, {"name", name}, {"sortOrder", order}
+                            }, rdata, err)) {
+                            (*refreshCats)();
+                        } else {
+                            QMessageBox::warning(this, QStringLiteral("失败"), err);
+                        }
+                    });
+                    bl->addWidget(editBtn);
+
+                    auto *delBtn = new QPushButton(QStringLiteral("删除"));
+                    delBtn->setStyleSheet("background:#F44336;color:white;padding:2px 8px;border-radius:3px;");
+                    connect(delBtn, &QPushButton::clicked, this, [this, c, refreshCats]() {
+                        auto ret = QMessageBox::warning(this, QStringLiteral("确认"),
+                            QStringLiteral("确定删除分类「%1」？").arg(c.name),
+                            QMessageBox::Yes | QMessageBox::No);
+                        if (ret != QMessageBox::Yes) return;// 如果用户不是点Yes（点No或者关闭弹窗），直接退出，不执行删除
+                        QJsonObject rdata;
+                        QString err;
+                        if (ClientConnector::instance().request(cs::cmd::CategoryRemove,
+                                QJsonObject{ {"id", c.id} }, rdata, err)) {
+                            (*refreshCats)();
+                        } else {
+                            QMessageBox::warning(this, QStringLiteral("失败"), err);
+                        }
+                    });
+                    bl->addWidget(delBtn);
+
+                    table->setCellWidget(row, 3, bw);
+                }
+            };
+            // 绑定【新增分类】按钮点击事件
+            connect(addBtn, &QPushButton::clicked, this, [this, refreshCats]() {
+                bool ok;
+                QString name = QInputDialog::getText(this, QStringLiteral("新增分类"),
+                    QStringLiteral("分类名称："), QLineEdit::Normal, QString(), &ok);
+                if (!ok || name.isEmpty()) return;
+                QJsonObject rdata;
+                QString err;
+                if (ClientConnector::instance().request(cs::cmd::CategoryAdd,
+                        QJsonObject{ {"name", name}, {"sortOrder", 0} }, rdata, err)) {
+                    (*refreshCats)();// 调用服务端插入这条新分类
+                } else {
+                    QMessageBox::warning(this, QStringLiteral("失败"), err);
+                }
+            });
+            connect(refreshBtn, &QPushButton::clicked, [refreshCats]() { (*refreshCats)(); });
+            registerLazy(page, *refreshCats);
+            adminTabs->addTab(page, QStringLiteral("📂 分类管理"));
+        }
+
+        // ===== 子Tab 3: 手续费 + 推荐系数调节 =====
+        {
+            auto *page = new QWidget();
+            auto *l = new QVBoxLayout(page);
+
+            auto *feeGroup = new QGroupBox(QStringLiteral("💸 手续费规则"), page);
+            auto *feeL = new QFormLayout(feeGroup);
+            auto *thresholdSpin = new QDoubleSpinBox(feeGroup);// 起征额输入框（小数旋转框）
+            thresholdSpin->setRange(0, 100000); thresholdSpin->setSuffix(QStringLiteral(" 元"));
+            auto *rateSpin = new QDoubleSpinBox(feeGroup);// 手续费率输入框
+            // 0 ~ 1，对应0% ~100%,点一次上下箭头变动0.001,保留3位小数，支持0.5%这种费率
+            rateSpin->setRange(0, 1); rateSpin->setSingleStep(0.001); rateSpin->setDecimals(3);
+            auto *saveFeeBtn = new QPushButton(QStringLiteral("💾 保存手续费设置"));
+            auto *timeoutSpin = new QSpinBox(feeGroup);// 超时自动结算天数（担保交易闭环）
+            timeoutSpin->setRange(1, 365); timeoutSpin->setSuffix(QStringLiteral(" 天"));
+            feeL->addRow(QStringLiteral("起征额（满多少元才开始收手续费）："), thresholdSpin);
+            feeL->addRow(QStringLiteral("费率（超过起征额部分的比例，如 0.005 表示 0.5%）："), rateSpin);
+            feeL->addRow(QStringLiteral("自动结算天数（付款后超该天数未确认收货，货款自动结算给卖家）："), timeoutSpin);
+            feeL->addRow(saveFeeBtn);
+
+            auto *coefGroup = new QGroupBox(QStringLiteral("📉 磨损推荐系数"), page);
+            auto *coefL = new QFormLayout(coefGroup);
+            QList<QPair<QString, QDoubleSpinBox*>> coefSpins;
+            QStringList conditions{
+                QStringLiteral("全新"), QStringLiteral("九成新"), QStringLiteral("八成新"),
+                QStringLiteral("七成新"), QStringLiteral("六成新及以下")
+            };
+            // 循环为每一种成色生成一个小数输入框
+            for (const auto &cond : conditions) {
+                auto *spin = new QDoubleSpinBox(coefGroup);
+                spin->setRange(0, 1); spin->setSingleStep(0.05); spin->setDecimals(2);
+                coefL->addRow(QStringLiteral("%1：").arg(cond), spin);
+                coefSpins.append({cond, spin});// 存入列表，方便后面读取、赋值
+            }
+            auto *saveCoefBtn = new QPushButton(QStringLiteral("💾 保存推荐系数"));
+            coefL->addRow(saveCoefBtn);
+
+            l->addWidget(feeGroup);
+            l->addWidget(coefGroup);
+            l->addStretch();
+
+            // C/S：首次显示该页时从服务端读取当前设置填充输入框
+            registerLazy(page, [this, thresholdSpin, rateSpin, timeoutSpin, coefSpins]() {
+                QJsonObject sdata;
+                QString serr;
+                if (ClientConnector::instance().request(cs::cmd::SettingsGet, {}, sdata, serr)) {
+                    thresholdSpin->setValue(sdata.value("feeThreshold").toDouble());
+                    rateSpin->setValue(sdata.value("feeRate").toDouble());
+                    timeoutSpin->setValue(sdata.value("timeoutDays").toInt());
+                    const QJsonObject coef = sdata.value("coef").toObject();
+                    for (const auto &p : coefSpins) {
+                        p.second->setValue(coef.value(p.first).toDouble());
+                    }
+                } else {
+                    QMessageBox::warning(this, QStringLiteral("失败"), serr);
+                }
+            });
+
+            connect(saveFeeBtn, &QPushButton::clicked, this, [thresholdSpin, rateSpin, timeoutSpin]() {
+                QJsonObject rdata;
+                QString err;
+                if (ClientConnector::instance().request(cs::cmd::SettingsSet, QJsonObject{
+                        {"feeThreshold", thresholdSpin->value()},
+                        {"feeRate", rateSpin->value()},
+                        {"timeoutDays", timeoutSpin->value()}
+                    }, rdata, err)) {
+                    QMessageBox::information(nullptr, QStringLiteral("成功"), QStringLiteral("手续费设置已保存"));
+                } else {
+                    QMessageBox::warning(nullptr, QStringLiteral("失败"), err);
+                }
+            });
+            connect(saveCoefBtn, &QPushButton::clicked, this, [coefSpins]() {
+                QJsonObject coefObj;
+                for (const auto &p : coefSpins) {
+                    coefObj.insert(p.first, p.second->value());
+                }
+                QJsonObject rdata;
+                QString err;
+                if (ClientConnector::instance().request(cs::cmd::SettingsSet,
+                        QJsonObject{ {"coef", coefObj} }, rdata, err)) {
+                    QMessageBox::information(nullptr, QStringLiteral("成功"), QStringLiteral("推荐系数已保存"));
+                } else {
+                    QMessageBox::warning(nullptr, QStringLiteral("失败"), err);
+                }
+            });
+
+            adminTabs->addTab(page, QStringLiteral("💸 手续费 / 推荐系数"));
+        }
+
+        // ===== 子Tab 4: 充值码批量生成 =====
+        {
+            auto *page = new QWidget();
+            auto *l = new QVBoxLayout(page);
+            auto *form = new QGridLayout();
+            auto *amountSpin = new QDoubleSpinBox(page);
+            amountSpin->setRange(1, 100000); amountSpin->setSuffix(QStringLiteral(" 元"));// 金额范围：1 ~ 100000
+            auto *countSpin = new QSpinBox(page);
+            countSpin->setRange(1, 100);// 一次最多生成100个充值码
+            auto *genBtn = new QPushButton(QStringLiteral("🎁 生成充值码"));
+            genBtn->setStyleSheet("background:#9C27B0;color:white;padding:8px 20px;border-radius:6px;");
+            form->addWidget(new QLabel(QStringLiteral("金额：")), 0, 0);
+            form->addWidget(amountSpin, 0, 1);
+            form->addWidget(new QLabel(QStringLiteral("数量：")), 1, 0);
+            form->addWidget(countSpin, 1, 1);
+            form->addWidget(genBtn, 2, 0, 1, 2);
+            l->addLayout(form);
+
+            auto *resultEdit = new QTextEdit(page);// 文本框，展示生成好的充值码
+            resultEdit->setReadOnly(true);// 设置只读，管理员只能看不能修改
+            resultEdit->setPlaceholderText(QStringLiteral("生成的充值码会显示在这里..."));
+            l->addWidget(new QLabel(QStringLiteral("📋 生成结果：")));
+            l->addWidget(resultEdit);
+
+            connect(genBtn, &QPushButton::clicked, this, [amountSpin, countSpin, resultEdit]() {
+                QJsonObject data;
+                QString err;
+                if (!ClientConnector::instance().request(cs::cmd::RedeemGenerate, QJsonObject{
+                        {"amount", amountSpin->value()}, {"count", countSpin->value()}
+                    }, data, err)) {
+                    QMessageBox::warning(nullptr, QStringLiteral("失败"), err);
+                    return;
+                }
+                QStringList codes;
+                for (const auto &v : data.value("codes").toArray()) {
+                    codes.append(v.toString());
+                }
+                resultEdit->setText(codes.join("\n"));
+            });
+
+            adminTabs->addTab(page, QStringLiteral("🎁 充值码生成"));
+        }
+
+        // 管理员面板懒加载：首次显示触发默认子页；切换子页时各自首次刷新
+        registerLazy(m_tabAdmin, [adminTabs, runLazy]() { runLazy(adminTabs->currentWidget()); });
+        connect(adminTabs, &QTabWidget::currentChanged, this,
+                [adminTabs, runLazy]() { runLazy(adminTabs->currentWidget()); });
+
+        m_tabWidget->addTab(m_tabAdmin, QStringLiteral("🛡️ 管理员面板"));
+        qDebug() << "[setupUI] Tab7 管理员面板 完成";
+    }
+
     // 主 Tab 切换：首次显示某页时才拉数据（懒加载；登录后只加载默认的浏览页）
     connect(m_tabWidget, &QTabWidget::currentChanged, this, [this, runLazy]() {
         runLazy(m_tabWidget->currentWidget());
