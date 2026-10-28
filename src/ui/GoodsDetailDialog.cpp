@@ -165,6 +165,9 @@ void GoodsDetailDialog::setupUI()
 
     auto *btnRow = new QHBoxLayout();
     if (!m_viewMode) {
+        m_favBtn = new QPushButton(QStringLiteral("收藏"), this);
+        connect(m_favBtn, &QPushButton::clicked, this, &GoodsDetailDialog::onFavClicked);
+        btnRow->addWidget(m_favBtn);
     }
     btnRow->addStretch();
 
@@ -250,6 +253,25 @@ void GoodsDetailDialog::loadData()
     // 只读模式下不处理收藏/购买状态（按钮不存在）
     if (m_viewMode) return;
 
+    // 收藏状态（C/S：拉收藏列表判断）
+    m_isFav = false;
+    {
+        QJsonObject d; QString e;
+        if (ClientConnector::instance().request(cs::cmd::FavoriteList, {}, d, e)) {
+            const QJsonArray arr = d.value("goods").toArray();
+            for (const auto &v : arr) {
+                if (jsoncv::goodsFromJson(v.toObject()).id == m_goods.id) {
+                    m_isFav = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (m_isFav) {
+        m_favBtn->setText(QStringLiteral("❤️ 已收藏"));
+        m_favBtn->setStyleSheet("background: #ffeb3b; border-radius: 6px; padding: 6px 16px;");
+    }
+
 
 }
 
@@ -279,7 +301,31 @@ void GoodsDetailDialog::onNextImage()
     }
 }
 
-
+void GoodsDetailDialog::onFavClicked()
+{
+    QJsonObject d; QString e;
+    if (m_isFav) {
+        if (!ClientConnector::instance().request(cs::cmd::FavoriteRemove,
+                QJsonObject{ {"goodsId", m_goods.id} }, d, e)) {
+            QMessageBox::warning(this, QStringLiteral("失败"), e);
+            return;
+        }
+        m_isFav = false;
+        m_favBtn->setText(QStringLiteral("❤️ 收藏"));
+        m_favBtn->setStyleSheet("");
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("已取消收藏"));
+    } else {
+        if (!ClientConnector::instance().request(cs::cmd::FavoriteAdd,
+                QJsonObject{ {"goodsId", m_goods.id} }, d, e)) {
+            QMessageBox::warning(this, QStringLiteral("失败"), e);
+            return;
+        }
+        m_isFav = true;
+        m_favBtn->setText(QStringLiteral("❤️ 已收藏"));
+        m_favBtn->setStyleSheet("background: #ffeb3b; border-radius: 6px; padding: 6px 16px;");
+        QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("收藏成功！"));
+    }
+}
 
 
 

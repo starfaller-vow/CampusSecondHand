@@ -188,6 +188,98 @@ void MainWindow::setupUI()
     m_tabWidget->addTab(m_tabMyGoods, QStringLiteral("📦 我的商品"));
     qDebug() << "[setupUI] Tab2 我的商品 完成";
 
+    // Tab 4: 收藏夹
+    qDebug() << "[setupUI] Tab4 收藏夹 开始";
+    m_tabFavorites = new QWidget();
+    {
+        auto *l = new QVBoxLayout(m_tabFavorites);
+
+        auto *topBar = new QHBoxLayout();
+        auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新收藏夹"));
+        topBar->addWidget(refreshBtn);
+        topBar->addStretch();
+        l->addLayout(topBar);
+
+        auto *scrollArea = new QScrollArea(m_tabFavorites);//创建滚动区域，收藏商品多的时候，可以上下滚动浏览。
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        l->addWidget(scrollArea);
+
+        auto *gridContainer = new QWidget(scrollArea);//网格布局容器（商品卡片布局，商品很多时，方便滚动
+        auto *gridLayout = new QGridLayout(gridContainer);
+        gridLayout->setSpacing(10);
+        scrollArea->setWidget(gridContainer);
+
+        auto refreshFav = std::make_shared<std::function<void()>>();//定义收藏夹刷新函数
+        *refreshFav = [this, gridContainer, gridLayout, refreshFav]() {
+            // 清空旧卡片
+            QLayoutItem *item;
+            while ((item = gridLayout->takeAt(0)) != nullptr) {
+                if (item->widget()) item->widget()->deleteLater();
+                delete item;
+            }
+
+            // C/S：服务端直接返回收藏的商品列表（已删除的商品服务端已跳过）
+            QJsonObject data;
+            QString err;
+            if (!ClientConnector::instance().request(cs::cmd::FavoriteList, {}, data, err)) {
+                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                return;
+            }
+            QList<Goods> favGoods;
+            for (const auto &v : data.value("goods").toArray()) {
+                favGoods.append(jsoncv::goodsFromJson(v.toObject()));
+            }
+
+            int col = 0, row = 0, maxCol = 3;
+
+            for (const Goods &g : favGoods) {
+                auto *card = new GoodsCardWidget(g, gridContainer);
+                card->setMinimumHeight(180);
+
+                // 点击卡片 → 打开详情（详情弹窗内部会从服务端重新加载最新数据）
+                connect(card, &GoodsCardWidget::cardClicked, this, [this, g](int) {
+                    GoodsDetailDialog dlg(g.id, m_user.id, this);
+                    dlg.exec();
+                });
+
+                // 右上角：取消收藏按钮
+                auto *unfavBtn = new QPushButton(QStringLiteral("✕"), card);
+                unfavBtn->setFixedSize(24, 24);
+                unfavBtn->setCursor(Qt::PointingHandCursor);
+                unfavBtn->setStyleSheet(
+                    "QPushButton { background: rgba(244,67,54,0.8); color: white; border-radius: 12px; "
+                    "font-weight: bold; border: none; }"
+                    "QPushButton:hover { background: #F44336; }"
+                );
+                unfavBtn->raise();
+                unfavBtn->move(150, 6);
+
+                connect(unfavBtn, &QPushButton::clicked, this, [this, g, refreshFav]() {
+                    QJsonObject rdata;
+                    QString err;
+                    if (!ClientConnector::instance().request(cs::cmd::FavoriteRemove,
+                            QJsonObject{ {"goodsId", g.id} }, rdata, err)) {
+                        QMessageBox::warning(this, QStringLiteral("失败"), err);
+                        return;
+                    }
+                    (*refreshFav)();
+                });
+
+                gridLayout->addWidget(card, row, col, Qt::AlignLeft | Qt::AlignTop);
+                col++;
+                if (col >= maxCol) { col = 0; row++; }//一行最多三个商品
+            }
+
+            gridLayout->setRowStretch(row + 1, 1);
+        };
+
+        connect(refreshBtn, &QPushButton::clicked, [refreshFav]() { (*refreshFav)(); });
+        registerLazy(m_tabFavorites, *refreshFav);
+    }
+    m_tabWidget->addTab(m_tabFavorites, QStringLiteral("❤️ 收藏夹"));
+    qDebug() << "[setupUI] Tab4 收藏夹 完成";
+
     // Tab 5: 消息
     qDebug() << "[setupUI] Tab5 消息 开始";
     m_tabMessages = new QWidget();
@@ -388,12 +480,84 @@ void MainWindow::setupUI()
 
         auto *contactBtn = makeBtn(QStringLiteral("📝 修改联系方式"), "#2196F3");
         auto *pwdBtn     = makeBtn(QStringLiteral("🔑 修改密码"),    "#FF9800");
+        auto *redeemBtn  = makeBtn(QStringLiteral("💳 兑换充值码"),  "#9C27B0");
         btnGrid->addWidget(contactBtn, 0, 0);
         btnGrid->addWidget(pwdBtn,     0, 1);
+        btnGrid->addWidget(redeemBtn,  1, 0, 1, 2);
         leftL->addLayout(btnGrid);
         leftL->addStretch();
 
+        // 右半边：余额流水
+        auto *rightPanel = new QWidget();
+        auto *rightL = new QVBoxLayout(rightPanel);
+
+        // 标题栏 + 手动刷新按钮：交易结算/退款等余额变动后，可立即刷新查看最新流水
+        auto *balHeader = new QHBoxLayout();
+        balHeader->addWidget(new QLabel(QStringLiteral("📊 余额流水")));
+        balHeader->addStretch();
+        auto *balRefreshBtn = new QPushButton(QStringLiteral("🔄 刷新"));
+        balRefreshBtn->setStyleSheet(
+            "QPushButton { background:#455A64; color:white; padding:4px 12px; "
+            "border-radius:4px; font-size:12px; }"
+            "QPushButton:hover { background:#546E7A; }");
+        balHeader->addWidget(balRefreshBtn);
+        rightL->addLayout(balHeader);
+
+        auto *balTable = new QTableWidget(rightPanel);
+        balTable->setColumnCount(4);
+        balTable->setHorizontalHeaderLabels(QStringList{
+            QStringLiteral("类型"), QStringLiteral("变动金额"),
+            QStringLiteral("变动后余额"), QStringLiteral("时间")
+        });
+        balTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        balTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        balTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+        rightL->addWidget(balTable);
+
+        auto refreshBalanceLog = [this, balTable]() {//刷新余额变动记录表
+            balTable->setRowCount(0);
+
+            // C/S：从服务端拉取余额流水
+            QJsonObject data;
+            QString err;
+            if (!ClientConnector::instance().request(cs::cmd::BalanceLogs, {}, data, err)) {
+                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                return;
+            }
+            QList<BalanceLog> logs;
+            for (const auto &v : data.value("logs").toArray()) {
+                logs.append(jsoncv::balanceLogFromJson(v.toObject()));
+            }
+            std::sort(logs.begin(), logs.end(), [](const BalanceLog &a, const BalanceLog &b) {
+                return a.createTime > b.createTime;//**新的余额记录排在最上方**（时间倒序）
+            });
+            for (const BalanceLog &l : logs) {
+                int row = balTable->rowCount();
+                balTable->insertRow(row);
+                QString typeText;
+                QString typeColor;
+                if (l.type == "recharge")     { typeText = QStringLiteral("💰 充值");    typeColor = "#2E7D32"; }
+                else if (l.type == "consume") { typeText = QStringLiteral("🛒 消费");    typeColor = "#C62828"; }
+                else if (l.type == "sale")    { typeText = QStringLiteral("💵 售出收入"); typeColor = "#2E7D32"; }
+                else if (l.type == "refund")  { typeText = QStringLiteral("↩️ 退款");    typeColor = "#1565C0"; }
+                else if (l.type == "fee_deduct"){ typeText = QStringLiteral("💸 手续费"); typeColor = "#FF9800"; }
+                else if (l.type == "fee_return"){ typeText = QStringLiteral("💸 手续费退回"); typeColor = "#2196F3"; }
+                else                           { typeText = l.type; typeColor = "#000"; }//用type原值
+                balTable->setItem(row, 0, new QTableWidgetItem(typeText));//在第`row`行，第 0 列填入**操作类型文字**（充值 / 扣款 / 其他类型）
+                auto *amtItem = new QTableWidgetItem(
+                    QStringLiteral("%1%2").arg(l.amount >= 0 ? "+" : "").arg(l.amount, 0, 'f', 2));//`l.amount`：本次余额变动值，如果金额大于等于 0，前面拼接`+`；负数就不带加号，自动显示负号
+                amtItem->setForeground(QColor(l.amount >= 0 ? "#2E7D32" : "#C62828"));
+                balTable->setItem(row, 1, amtItem);
+                balTable->setItem(row, 2, new QTableWidgetItem(
+                    QStringLiteral("¥%1").arg(l.balanceAfter, 0, 'f', 2)));//填入**本次操作完成之后的余额**
+                balTable->setItem(row, 3, new QTableWidgetItem(l.createTime));
+            }
+        };
+        // 手动刷新按钮 + 推送触发的自动刷新钩子（交易结算/退款到账后无需手动点刷新）
+        connect(balRefreshBtn, &QPushButton::clicked, refreshBalanceLog);
+        m_balanceRefreshHook = refreshBalanceLog;
         mainL->addWidget(leftPanel, 1);
+        mainL->addWidget(rightPanel, 2);//权重 1 : 权重 2。水平方向空间分配比例：左侧占 1 份，右侧占 2 份，右边日志区域更宽
 
         // ===== 修改联系方式 =====
         connect(contactBtn, &QPushButton::clicked, this, [this, refreshInfo]() {
@@ -452,6 +616,26 @@ void MainWindow::setupUI()
             }
         });
 
+        // ===== 兑换充值码 =====
+        connect(redeemBtn, &QPushButton::clicked, this, [this, refreshInfo, refreshBalanceLog]() {
+            bool ok;//`ok`用来判断用户是点了【确定】还是【取消】
+            QString code = QInputDialog::getText(this, QStringLiteral("兑换充值码"),//弹出输入框
+                QStringLiteral("请输入充值码："), QLineEdit::Normal, "", &ok).trimmed();//去掉字符串前后多余空格，防止用户不小心输入空格导致兑换失败
+            if (!ok || code.isEmpty()) return;
+            QJsonObject data;
+            QString err;
+            if (ClientConnector::instance().request(cs::cmd::Redeem,
+                    QJsonObject{ {"code", code} }, data, err)) {
+                const double newBal = data.value("balance").toDouble();
+                QMessageBox::information(this, QStringLiteral("成功"),
+                    QStringLiteral("兑换成功！新余额：¥%1").arg(newBal, 0, 'f', 2));
+                refreshInfo();
+                refreshBalanceLog();
+            } else {
+                QMessageBox::warning(this, QStringLiteral("失败"), err);
+            }
+        });
+
         // ===== 联系管理员（反馈消息直达管理员消息箱，仅普通用户可见）=====
         if (!m_user.isAdmin()) {
             auto *contactAdminBtn = makeBtn(QStringLiteral("📮 联系管理员"), "#00897B");
@@ -486,8 +670,9 @@ void MainWindow::setupUI()
                     QStringLiteral("反馈已发送给管理员，请耐心等待处理。"));
             });
         }
-        registerLazy(m_tabProfile, [refreshInfo]() {
+        registerLazy(m_tabProfile, [refreshInfo, refreshBalanceLog]() {
             refreshInfo();
+            refreshBalanceLog();
         });
     }
     m_tabWidget->addTab(m_tabProfile, QStringLiteral("👤 个人中心"));

@@ -48,6 +48,7 @@ public:
                             User &outUser, QString &errorMsg);
 
     // ===== 更新 =====
+    static bool updateBalance(int userId, double newBalance, QString &errorMsg);
     static bool updateContact(int userId, const QString &contact, QString &errorMsg);
     static bool updatePassword(int userId, const QString &newPasswordHash, QString &errorMsg);
 
@@ -59,6 +60,8 @@ public:
      * @param newBalanceOut 成功时返回操作后余额
      * @param useTransaction true=内部自己开事务；false=调用方已开事务，跳过内部事务
      */
+    static bool changeBalance(int userId, double delta, double &newBalanceOut,
+                              QString &errorMsg, bool useTransaction = true);
 
     // ===== 工具：密码哈希 =====
     static QString hashPassword(const QString &password);

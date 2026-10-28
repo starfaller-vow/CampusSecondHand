@@ -181,7 +181,18 @@ bool UserDAO::loginByHash(const QString &username, const QString &passwordHash,
 
 // ==================== 更新 ====================
 
-
+bool UserDAO::updateBalance(int userId, double newBalance, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE users SET balance = ? WHERE id = ?");
+    q.addBindValue(newBalance);
+    q.addBindValue(userId);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    return true;
+}
 
 
 
@@ -211,4 +222,56 @@ bool UserDAO::updatePassword(int userId, const QString &newPasswordHash, QString
     return true;
 }
 
+bool UserDAO::changeBalance(int userId, double delta, double &newBalanceOut,
+                            QString &errorMsg, bool useTransaction)
+{
+    QSqlDatabase db = DatabaseManager::instance().db();
 
+    // 仅在调用方未开事务时，自己开事务
+    if (useTransaction) {
+        if (!db.transaction()) {
+            errorMsg = QStringLiteral("无法开启事务");
+            return false;
+        }
+    }
+
+    // 1. 读取当前余额
+    QSqlQuery q(db);
+    q.prepare("SELECT balance FROM users WHERE id = ?");
+    q.addBindValue(userId);
+    if (!q.exec() || !q.next()) {
+        errorMsg = QStringLiteral("用户不存在");
+        if (useTransaction) db.rollback();
+        return false;
+    }
+
+    double currentBalance = q.value(0).toDouble();
+    double newBalance = currentBalance + delta;
+
+    if (newBalance < 0) {
+        errorMsg = QStringLiteral("余额不足");
+        if (useTransaction) db.rollback();
+        return false;
+    }
+
+    // 2. 更新余额
+    q.prepare("UPDATE users SET balance = ? WHERE id = ?");
+    q.addBindValue(newBalance);
+    q.addBindValue(userId);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        if (useTransaction) db.rollback();
+        return false;
+    }
+
+    // 仅自己开事务时才 commit
+    if (useTransaction) {
+        if (!db.commit()) {
+            errorMsg = db.lastError().text();
+            return false;
+        }
+    }
+
+    newBalanceOut = newBalance;
+    return true;
+}

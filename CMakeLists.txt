@@ -84,6 +84,27 @@ target_link_libraries(CampusServer PRIVATE
 )
 
 # ============================================================
+# 运行期 Qt DLL 部署（避免手动运行 exe 时提示找不到 Qt6*.dll）
+# ============================================================
+if(WIN32)
+    get_target_property(_qt_qmake Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qt_qmake}" DIRECTORY)
+    set(_windeployqt "${_qt_bin_dir}/windeployqt.exe")
+
+    foreach(_target CampusSecondHand CampusServer)
+        add_custom_command(TARGET ${_target} POST_BUILD
+            COMMAND "${_windeployqt}"
+                --no-translations
+                --no-opengl-sw
+                --no-system-d3d-compiler
+                "$<TARGET_FILE:${_target}>"
+            COMMENT "部署 Qt 运行库到 ${_target} 输出目录"
+            VERBATIM
+        )
+    endforeach()
+endif()
+
+# ============================================================
 # 运行时文件拷贝（init.sql/words.txt 数据归服务端，客户端不再需要）
 # ============================================================
 add_custom_command(TARGET CampusServer POST_BUILD

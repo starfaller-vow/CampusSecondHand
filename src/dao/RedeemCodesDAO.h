@@ -10,5 +10,6 @@ public:
      * @brief 兑换充值码
      * @return true=成功兑换，outBalance=兑换后用户余额
      */
+    static bool redeem(const QString &code, int userId, double &outBalance, QString &err);
 };
 #endif

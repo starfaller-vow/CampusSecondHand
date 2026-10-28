@@ -15,8 +15,10 @@
 #include "GoodsDAO.h"
 #include "GoodsManager.h"
 #include "CategoriesDAO.h"
+#include "FavoritesDAO.h"
 #include "MessagesDAO.h"
 #include "RedeemCodesDAO.h"
+#include "BalanceLogsDAO.h"
 #include "SettingsDAO.h"
 #include "../shared/PushRegistry.h"
 
@@ -287,11 +289,27 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
 
     // ==================== 收藏 ====================
 
+    if (cmd == cs::cmd::FavoriteList) {
+        QJsonArray arr;
+        // 返回收藏的商品列表（客户端卡片直接渲染）；已删除的商品跳过
+        for (const Favorite &f : FavoritesDAO::getByUser(uid)) {
+            const Goods g = GoodsDAO::getById(f.goodsId);
+            if (g.id != 0) arr.append(goodsJsonWithContext(g));
+        }
+        return QJsonObject{ {"goods", arr} };
+    }
 
+    if (cmd == cs::cmd::FavoriteAdd) {
+        if (!FavoritesDAO::add(uid, p.value("goodsId").toInt())) {
+            err = QStringLiteral("收藏失败"); return {};
+        }
+        return QJsonObject{};
+    }
 
-
-
-
+    if (cmd == cs::cmd::FavoriteRemove) {
+        FavoritesDAO::remove(uid, p.value("goodsId").toInt());
+        return QJsonObject{};
+    }
 
     // ==================== 消息 ====================
 
@@ -352,9 +370,20 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
 
     // ==================== 钱包 ====================
 
+    if (cmd == cs::cmd::Redeem) {
+        double newBal = 0;
+        if (!RedeemCodesDAO::redeem(p.value("code").toString().trimmed(),
+                                    uid, newBal, err)) return {};
+        return QJsonObject{ {"balance", newBal} };
+    }
 
-
-
+    if (cmd == cs::cmd::BalanceLogs) {
+        QJsonArray arr;
+        for (const BalanceLog &l : BalanceLogsDAO::getByUser(uid)) {
+            arr.append(jsoncv::balanceLogToJson(l));
+        }
+        return QJsonObject{ {"logs", arr} };
+    }
 
     // ==================== 举报（提交人人可为）====================
 
