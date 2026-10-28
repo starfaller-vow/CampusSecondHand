@@ -38,7 +38,7 @@
       "name": "QT653",
       "inherits": "Qt",
       "environment": {
-        "QTDIR": "D:/QT/6.5.3/msvc2019_64"
+        "QTDIR":"D:/Qt/6.5.3/msvc2019_64"
       },
       "architecture": {
         "strategy": "external",

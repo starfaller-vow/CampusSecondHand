@@ -12,6 +12,8 @@
 #include "DatabaseManager.h"
 #include "UserDAO.h"
 #include "UserManager.h"
+#include "GoodsDAO.h"
+#include "GoodsManager.h"
 #include "CategoriesDAO.h"
 #include "MessagesDAO.h"
 #include "RedeemCodesDAO.h"
@@ -81,7 +83,13 @@ bool requireAdmin(Dispatcher &d, const QString &token, int &adminId, QString &er
 }
 
 // 商品 JSON 附带卡片展示所需的分类名与卖家用户名（客户端无需再额外请求）
-
+QJsonObject goodsJsonWithContext(const Goods &g)
+{
+    QJsonObject o = jsoncv::goodsToJson(g);
+    o.insert("categoryName", CategoriesDAO::getById(g.categoryId).name);
+    o.insert("sellerName", UserDAO::getById(g.sellerId).username);
+    return o;
+}
 
 // 交易 JSON（用户视角）：一次性附带商品信息与对端用户信息，消灭客户端列表的逐行 N+1 请求
 
@@ -142,10 +150,33 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     }
 
     // ---- 商品浏览/搜索（无需登录，与单机版一致）----
+    if (cmd == cs::cmd::ListGoods) {
+        GoodsDAO::QueryOptions opt;
+        opt.keyword    = p.value("keyword").toString().trimmed();
+        opt.categoryId = p.value("categoryId").toInt();
+        opt.minPrice   = p.value("minPrice").toDouble();
+        opt.maxPrice   = p.value("maxPrice").toDouble();
+        const QString field = p.value("sortField").toString();
+        const QString order = p.value("sortOrder").toString();
+        if (!field.isEmpty()) opt.sortField = field;
+        if (!order.isEmpty()) opt.sortOrder = order;
 
+        QJsonArray arr;
+        const QList<Goods> list = GoodsManager::instance().browseOnSale(opt);
+        for (const Goods &g : list) {
+            arr.append(goodsJsonWithContext(g));
+        }
+        return QJsonObject{ {"goods", arr} };
+    }
 
     // ---- 商品详情（任何人可看，购买需要登录）----
-
+    if (cmd == cs::cmd::GoodsDetail) {
+        const Goods g = GoodsDAO::getById(p.value("goodsId").toInt());
+        if (g.id == 0) { err = QStringLiteral("商品不存在"); return {}; }
+        return QJsonObject{
+            {"goods", goodsJsonWithContext(g)}
+        };
+    }
 
     // ---- 用户公开信息（交易记录对端显示等）----
     if (cmd == cs::cmd::UserGet) {
@@ -181,13 +212,70 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     }
 
     // ---- 推荐价（发布时参考）----
-
+    if (cmd == cs::cmd::SuggestPrice) {
+        const QString cond = p.value("condition").toString();
+        const double price = GoodsManager::suggestPrice(cond, p.value("originalPrice").toDouble());
+        return QJsonObject{
+            {"price", price},
+            {"coef", SettingsDAO::conditionCoef(cond)}
+        };
+    }
 
     // ==================== 商品：我的/发布/编辑/上下架 ====================
 
+    if (cmd == cs::cmd::MineGoods) {
+        QJsonArray arr;
+        for (const Goods &g : GoodsDAO::getBySeller(uid)) {
+            arr.append(goodsJsonWithContext(g));
+        }
+        return QJsonObject{ {"goods", arr} };
+    }
 
+    if (cmd == cs::cmd::PublishGoods) {
+        // 图片已通过 image.upload 传到服务端，这里只存文件名列表
+        const QString title = p.value("title").toString().trimmed();
+        const QString desc  = p.value("description").toString().trimmed();
+        const double originalPrice = p.value("originalPrice").toDouble();
+        const QString condition    = p.value("condition").toString();
+        const double currentPrice  = p.value("currentPrice").toDouble();
+        const int categoryId       = p.value("categoryId").toInt();
+        const QString contact      = p.value("contact").toString().trimmed();
 
+        if (title.isEmpty())      { err = QStringLiteral("标题不能为空"); return {}; }
+        if (desc.isEmpty())       { err = QStringLiteral("描述不能为空"); return {}; }
+        if (originalPrice <= 0)   { err = QStringLiteral("原价必须大于0"); return {}; }
+        if (currentPrice <= 0)    { err = QStringLiteral("现价必须大于0"); return {}; }
+        if (categoryId <= 0)      { err = QStringLiteral("请选择分类"); return {}; }
 
+        QString hit;
+        if (GoodsManager::containsSensitiveWord(title, hit)) {
+            err = QStringLiteral("标题包含敏感词：%1").arg(hit); return {};
+        }
+        if (GoodsManager::containsSensitiveWord(desc, hit)) {
+            err = QStringLiteral("描述包含敏感词：%1").arg(hit); return {};
+        }
+
+        // 组装图片 JSON（服务端只接受已上传的合法文件名）
+        QJsonArray imgArr;
+        const QJsonArray names = p.value("images").toArray();
+        for (const auto &v : names) {
+            const QString fname = QFileInfo(v.toString()).fileName();
+            imgArr.append(QStringLiteral("images/%1").arg(fname));
+        }
+
+        Goods g;
+        g.sellerId      = uid;
+        g.title         = title;
+        g.description   = desc;
+        g.originalPrice = originalPrice;
+        g.condition     = condition;
+        g.currentPrice  = currentPrice;
+        g.categoryId    = categoryId;
+        g.imagesJson    = QString::fromUtf8(QJsonDocument(imgArr).toJson(QJsonDocument::Compact));
+        g.status        = "on_sale";
+        if (!GoodsDAO::insert(g, err)) return {};
+        return QJsonObject{ {"goodsId", 0} };
+    }
 
 
 

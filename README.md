@@ -1,8 +1,7 @@
-# 校园二手交易系统：03 后台基础配置
+# 校园二手交易系统：04 商品发布与浏览
 
-负责人：黄广淼。本目录为累计源码快照，前置功能、新增功能与边界见本次提交说明。
+负责人：宋成浩。本目录为累计源码快照，前置功能、新增功能与边界见本次提交说明。
 
-使用 VS2026 的“打开文件夹”打开本目录，
 
 Qt 安装路径保留在 CMakeUserPresets.json 的 QT653 预设的 QTDIR 环境变量中：D:/QT/6.5.3/msvc2019_64。
 
@@ -16,4 +15,5 @@ Qt 安装路径保留在 CMakeUserPresets.json 的 QT653 预设的 QTDIR 环境�
 cmake --preset Qt-Release
 cmake --build out/build/release
 ```
+
 

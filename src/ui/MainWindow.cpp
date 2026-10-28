@@ -1,5 +1,9 @@
 #include "MainWindow.h"
 #include "LoginWindow.h"
+#include "BrowseGoodsPage.h"
+#include "PublishGoodsDialog.h"
+#include "GoodsDetailDialog.h"
+#include "GoodsCardWidget.h"
 #include "ClientConnector.h"
 #include "../shared/Protocol.h"
 #include "../shared/JsonConv.h"
@@ -70,6 +74,119 @@ void MainWindow::setupUI()
         m_lazyRefreshers.erase(it); // 先移除后执行，防止重入重复刷新
         fn();
     };
+
+    // Tab 1: 商品浏览（实际实现）
+    qDebug() << "[setupUI] Tab1 浏览页 开始";
+    auto *browsePage = new BrowseGoodsPage(m_user.id, this);
+    m_tabWidget->addTab(browsePage, QStringLiteral("🛍️ 商品浏览"));
+    registerLazy(browsePage, [browsePage]() { browsePage->refresh(); });
+    qDebug() << "[setupUI] Tab1 浏览页 完成";
+
+    // Tab 2: 我的商品
+    qDebug() << "[setupUI] Tab2 我的商品 开始";
+    m_tabMyGoods = new QWidget();
+    {
+        auto *l = new QVBoxLayout(m_tabMyGoods);
+
+        // 顶部工具条
+        auto *topBar = new QHBoxLayout();//水平布局
+        auto *publishBtn = new QPushButton(QStringLiteral("📤 发布新商品"), m_tabMyGoods);
+        publishBtn->setMinimumHeight(40);
+        publishBtn->setStyleSheet(
+            "QPushButton { background: #2E7D32; color: white; padding: 8px 20px; border-radius: 6px; font-size: 14px; }"
+            "QPushButton:hover { background: #1B5E20; }"
+        );
+        auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新"), m_tabMyGoods);
+        refreshBtn->setMinimumHeight(40);
+        topBar->addWidget(publishBtn);
+        topBar->addWidget(refreshBtn);
+        topBar->addStretch();
+        l->addLayout(topBar);
+
+        auto *table = new QTableWidget(m_tabMyGoods);
+        table->setColumnCount(6);//设置表格有 6 列。
+        table->setHorizontalHeaderLabels(QStringList{
+            QStringLiteral("ID"), QStringLiteral("标题"), QStringLiteral("分类"),
+            QStringLiteral("现价"), QStringLiteral("状态"), QStringLiteral("操作")
+        });
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+        table->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);//设置选择行为为 SelectRows：用户点击表格时，选中 "整行"，而不是单个单元格
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);//设置编辑触发为 NoEditTriggers：禁止用户直接编辑单元格内容
+        l->addWidget(table);
+
+        // 刷新函数（shared_ptr 打破 lambda 自引用）
+        auto refreshTable = std::make_shared<std::function<void()>>();
+        *refreshTable = [this, table, refreshTable]() {
+            table->setRowCount(0);
+
+            // C/S：从服务端拉取我的商品
+            QJsonObject data;
+            QString err;
+            if (!ClientConnector::instance().request(cs::cmd::MineGoods, {}, data, err)) {
+                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                return;
+            }
+            QList<Goods> goodsList;
+            for (const auto &v : data.value("goods").toArray()) {
+                goodsList.append(jsoncv::goodsFromJson(v.toObject()));
+            }
+
+            QList<Category> cats;
+            QJsonObject cdata;
+            QString cerr;
+            if (ClientConnector::instance().request(cs::cmd::ListCategories, {}, cdata, cerr)) {
+                for (const auto &v : cdata.value("categories").toArray()) {
+                    cats.append(jsoncv::categoryFromJson(v.toObject()));
+                }
+            }
+
+            for (const Goods &g : goodsList) {
+                int row = table->rowCount();//获取表格当前已有行数
+                table->insertRow(row);//插入一行空白行
+                table->setItem(row, 0, new QTableWidgetItem(QString::number(g.id)));
+                table->setItem(row, 1, new QTableWidgetItem(g.title));//填入商品标题`g.title`
+                QString catName;
+                for (const auto &c : cats) if (c.id == g.categoryId) { catName = c.name; break; }//遍历全部分类，找到分类 id 等于当前商品`categoryId`的那一条，取出分类名称，找到就跳出循环。
+                table->setItem(row, 2, new QTableWidgetItem(catName));
+                table->setItem(row, 3, new QTableWidgetItem(
+                    QStringLiteral("¥%1").arg(g.currentPrice, 0, 'f', 2)));//现价
+
+                QString statusText;//单元格上显示的文字
+                QString statusColor;//颜色
+                if (g.status == "on_sale")      { statusText = QStringLiteral("🟢 在售");   statusColor = "#2E7D32"; }
+                else if (g.status == "off_shelf") {
+                    // 区分普通下架与举报下架
+                    if (g.isReportOff()) { statusText = QStringLiteral("🟠 举报下架"); statusColor = "#E65100"; }
+                    else                 { statusText = QStringLiteral("⚪ 已下架");   statusColor = "#757575"; }
+                }
+                else if (g.status == "reserved") { statusText = QStringLiteral("🟡 已锁定"); statusColor = "#F9A825"; }
+                else if (g.status == "sold")     { statusText = QStringLiteral("🔴 已售出"); statusColor = "#C62828"; }
+                else                              { statusText = g.status; statusColor = "#000"; }//如果状态不是上面 4 种（未知状态），展示原字符串，颜色为黑色
+                auto *statusItem = new QTableWidgetItem(statusText);
+                statusItem->setForeground(QColor(statusColor));
+                table->setItem(row, 4, statusItem);
+
+
+            }
+        };
+
+        connect(publishBtn, &QPushButton::clicked, this, [this, refreshTable]() {//发布商品，商品对话框
+            PublishGoodsDialog dlg(m_user.id, this);
+            if (dlg.exec() == QDialog::Accepted) {
+                (*refreshTable)();
+                // 同时刷新浏览页
+                auto *browsePage = findChild<BrowseGoodsPage*>();
+                if (browsePage) browsePage->refresh();
+            }
+        });
+        connect(refreshBtn, &QPushButton::clicked, this, [refreshTable]() { (*refreshTable)(); });//刷新按钮
+
+        registerLazy(m_tabMyGoods, *refreshTable);
+    }
+    m_tabWidget->addTab(m_tabMyGoods, QStringLiteral("📦 我的商品"));
+    qDebug() << "[setupUI] Tab2 我的商品 完成";
 
     // Tab 5: 消息
     qDebug() << "[setupUI] Tab5 消息 开始";

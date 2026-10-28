@@ -38,12 +38,15 @@ public:
                  QJsonObject &dataOut, QString &err, int timeOutMs = 15000);
 
     // 发送图片二进制帧（上传协议：request(image.upload) 声明 → sendImageFrame(bytes) → request(image.uploadDone)）
+    bool sendImageFrame(const QByteArray &payload);
 
     /**
      * @brief 从服务端下载图片（伪同步，超时 timeOutMs 毫秒）
      *        协议：request(image.download{name}) → 响应 JSON 后紧接一个 Image 帧
      * @return 成功 out 为图片字节；失败 err 为原因
      */
+    bool downloadImage(const QString &name, QByteArray &out,
+                       QString &err, int timeOutMs = 20000);
 
     // ===== 会话 =====
     QString token() const { return m_token; }

@@ -11,9 +11,11 @@
 // 会改变服务端状态的命令：同一命令+相同参数在途时拒绝重复提交（防双击/短时间重复点击）
 static const QSet<QString> kWriteCmds = {
     cs::cmd::Register, cs::cmd::UpdateContact, cs::cmd::ChangePassword,
+    cs::cmd::PublishGoods, cs::cmd::EditGoods, cs::cmd::DeleteGoods,
     cs::cmd::MessageMarkRead, cs::cmd::MessageReadAll, cs::cmd::ContactAdmin,
     cs::cmd::RedeemGenerate, cs::cmd::Redeem, cs::cmd::SettingsSet,
     cs::cmd::CategoryAdd, cs::cmd::CategoryUpdate, cs::cmd::CategoryRemove,
+    cs::cmd::ImageUpload, cs::cmd::ImageUploadDone
 };
 
 ClientConnector::ClientConnector(QObject *parent)
@@ -116,9 +118,70 @@ bool ClientConnector::request(const QString &cmd, const QJsonObject &params,
     return true;
 }
 
+bool ClientConnector::sendImageFrame(const QByteArray &payload)
+{
+    if (!isConnected()) return false;
+    m_socket->write(makeFrame(cs::FrameType::Image, payload));
+    m_socket->flush();
+    return true;
+}
 
+bool ClientConnector::downloadImage(const QString &name, QByteArray &out,
+                                    QString &err, int timeOutMs)
+{
+    if (!isConnected()) {
+        err = QStringLiteral("未连接服务器");
+        return false;
+    }
+    // Image 帧不携带 reqId，同一连接同一时刻只允许一个图片下载在途
+    if (m_imgReqId != 0) {
+        err = QStringLiteral("图片通道忙，请稍后重试");
+        return false;
+    }
 
+    const quint32 reqId = m_nextReqId++;
+    QJsonObject req;
+    req.insert("reqId", static_cast<int>(reqId));
+    req.insert("cmd", cs::cmd::ImageDownload);
+    req.insert("token", m_token);
+    req.insert("params", QJsonObject{ {"name", name} });
 
+    m_imgReqId  = reqId;
+    m_imgLoop   = nullptr;
+    m_imgPhase  = 0;
+    m_imgBuffer.clear();
+    m_imgErr.clear();
+    m_imgDone   = false;
+
+    m_socket->write(makeJsonFrame(req));
+    m_socket->flush();
+
+    // 伪同步等待：依次等 JSON 响应 → Image 帧；独立事件循环，与 JSON 请求等待表互不干扰
+    QEventLoop loop;
+    m_imgLoop = &loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(timeOutMs);
+    loop.exec();
+    m_imgLoop = nullptr;
+
+    const bool done = m_imgDone;
+    const QString imgErr = m_imgErr;
+    const QByteArray buf = m_imgBuffer;
+    m_imgReqId = 0;
+    m_imgPhase = 0;
+    m_imgBuffer.clear();
+    m_imgErr.clear();
+    m_imgDone  = false;
+
+    if (!done || !imgErr.isEmpty()) {
+        err = imgErr.isEmpty() ? QStringLiteral("图片下载超时：%1").arg(name) : imgErr;
+        return false;
+    }
+    out = buf;
+    return true;
+}
 
 void ClientConnector::onReadyRead()
 {
@@ -131,7 +194,17 @@ void ClientConnector::onReadyRead()
             return;
         }
         for (const auto &f : frames) {
-
+            if (f.first == cs::FrameType::Image) {
+                // 图片二进制帧：补全当前图片下载等待
+                if (m_imgReqId != 0 && m_imgPhase == 1) {
+                    m_imgBuffer = f.second;
+                    m_imgDone   = true;
+                    m_imgPhase  = 0;
+                    m_imgReqId  = 0;
+                    if (m_imgLoop) m_imgLoop->quit();
+                }
+                continue;
+            }
             const QJsonDocument doc = QJsonDocument::fromJson(f.second);
             if (!doc.isObject()) continue;
             const QJsonObject obj = doc.object();
@@ -144,6 +217,19 @@ void ClientConnector::onReadyRead()
             }
 
             const quint32 reqId = static_cast<quint32>(obj.value("reqId").toInt());
+
+            // 图片下载的 JSON 响应：ok 则继续等紧随其后的 Image 帧（优先于普通响应判定）
+            if (reqId == m_imgReqId && m_imgPhase == 0) {
+                if (obj.value("ok").toBool()) {
+                    m_imgPhase = 1;
+                } else {
+                    m_imgErr  = obj.value("err").toString();
+                    m_imgDone = true;
+                    m_imgReqId = 0;
+                    if (m_imgLoop) m_imgLoop->quit();
+                }
+                continue;
+            }
 
             // 普通响应：按 reqId 唤醒对应的等待项（嵌套请求互不影响）
             auto it = m_pending.find(reqId);
@@ -172,5 +258,11 @@ void ClientConnector::onDisconnected()
         it->err  = QStringLiteral("与服务器的连接已断开");
         if (it->loop) it->loop->quit();
     }
-
+    // 图片下载等待同样立即失败
+    if (m_imgReqId != 0) {
+        m_imgDone = true;
+        m_imgErr  = QStringLiteral("与服务器的连接已断开");
+        m_imgReqId = 0;
+        if (m_imgLoop) m_imgLoop->quit();
+    }
 }

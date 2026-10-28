@@ -34,6 +34,7 @@ private slots:
 
 private:
     void handleFrame(cs::FrameType type, const QByteArray &payload);
+    void handleImageFrame(const QByteArray &payload); // 图片二进制帧：写入待上传文件
     void sendJson(const QJsonObject &obj);
 
     qintptr m_socketDescriptor;
