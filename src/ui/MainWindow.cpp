@@ -168,7 +168,69 @@ void MainWindow::setupUI()
                 statusItem->setForeground(QColor(statusColor));
                 table->setItem(row, 4, statusItem);
 
+                // 操作按钮组
+                auto *btnWidget = new QWidget();
+                auto *btnLayout = new QHBoxLayout(btnWidget);
+                btnLayout->setContentsMargins(2, 2, 2, 2);
+                btnLayout->setSpacing(4);
 
+                if (g.status == "on_sale") {//在售
+                    auto *offBtn = new QPushButton(QStringLiteral("下架"));
+                    offBtn->setStyleSheet("QPushButton { background: #FF9800; color: white; padding: 2px 8px; border-radius: 3px; }");
+                    connect(offBtn, &QPushButton::clicked, this, [this, g, refreshTable]() {//接收者：`this`，代表当前窗口对象，用来管理这个信号槽的生命周期
+                        QJsonObject rdata;
+                        QString err;
+                        if (ClientConnector::instance().request(cs::cmd::OffShelf,
+                                QJsonObject{ {"goodsId", g.id} }, rdata, err)) {
+                            (*refreshTable)();
+                        } else {
+                            QMessageBox::warning(this, QStringLiteral("失败"), err);
+                        }
+                    });
+                    btnLayout->addWidget(offBtn);
+                } else if (g.status == "off_shelf") {//已下架
+                    if (g.isReportOff()) {
+                        // 被举报下架：卖家不能自行上架，只能由管理员在举报中心恢复
+                        auto *hint = new QLabel(QStringLiteral("🚫 举报下架"));
+                        hint->setStyleSheet("color:#C62828;font-size:12px;");
+                        btnLayout->addWidget(hint);
+                    } else {
+                        auto *onBtn = new QPushButton(QStringLiteral("上架"));
+                        onBtn->setStyleSheet("QPushButton { background: #4CAF50; color: white; padding: 2px 8px; border-radius: 3px; }");
+                        connect(onBtn, &QPushButton::clicked, this, [this, g, refreshTable]() {
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::OnShelf,
+                                    QJsonObject{ {"goodsId", g.id} }, rdata, err)) {
+                                (*refreshTable)();
+                            } else {
+                                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                            }
+                        });
+                        btnLayout->addWidget(onBtn);
+                    }
+                }
+
+                if (g.status == "on_sale") {//在售
+                    auto *delBtn = new QPushButton(QStringLiteral("删除"));
+                    delBtn->setStyleSheet("QPushButton { background: #F44336; color: white; padding: 2px 8px; border-radius: 3px; }");
+                    connect(delBtn, &QPushButton::clicked, this, [this, g, refreshTable]() {
+                        auto ret = QMessageBox::question(this, QStringLiteral("确认"),
+                            QStringLiteral("确定删除该商品吗？"));
+                        if (ret != QMessageBox::Yes) return;
+                        QJsonObject rdata;
+                        QString err;
+                        if (ClientConnector::instance().request(cs::cmd::DeleteGoods,
+                                QJsonObject{ {"goodsId", g.id} }, rdata, err)) {
+                            (*refreshTable)();
+                        } else {
+                            QMessageBox::warning(this, QStringLiteral("失败"), err);
+                        }
+                    });
+                    btnLayout->addWidget(delBtn);
+                }
+
+                table->setCellWidget(row, 5, btnWidget);
             }
         };
 

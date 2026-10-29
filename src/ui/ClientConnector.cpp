@@ -12,6 +12,7 @@
 static const QSet<QString> kWriteCmds = {
     cs::cmd::Register, cs::cmd::UpdateContact, cs::cmd::ChangePassword,
     cs::cmd::PublishGoods, cs::cmd::EditGoods, cs::cmd::DeleteGoods,
+    cs::cmd::OffShelf, cs::cmd::OnShelf, cs::cmd::ForceOffReport, cs::cmd::RestoreReport,
     cs::cmd::FavoriteAdd, cs::cmd::FavoriteRemove,
     cs::cmd::MessageMarkRead, cs::cmd::MessageReadAll, cs::cmd::ContactAdmin,
     cs::cmd::RedeemGenerate, cs::cmd::Redeem, cs::cmd::SettingsSet,

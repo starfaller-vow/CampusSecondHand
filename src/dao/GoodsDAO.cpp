@@ -134,13 +134,56 @@ bool GoodsDAO::insert(const Goods &g, QString &errorMsg)
     return true;
 }
 
+bool GoodsDAO::update(const Goods &g, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare(
+        "UPDATE goods SET title=?, description=?, original_price=?, condition=?, "
+        "current_price=?, category_id=?, images=?, update_time=datetime('now','localtime') "
+        "WHERE id=?"
+    );
+    q.addBindValue(g.title);
+    q.addBindValue(g.description);
+    q.addBindValue(g.originalPrice);
+    q.addBindValue(g.condition);
+    q.addBindValue(g.currentPrice);
+    q.addBindValue(g.categoryId);
+    q.addBindValue(g.imagesJson);
+    q.addBindValue(g.id);
 
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    return true;
+}
 
-
+bool GoodsDAO::deleteById(int id, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("DELETE FROM goods WHERE id = ?");
+    q.addBindValue(id);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    return true;
+}
 
 // ==================== 状态流转 ====================
 
-
+bool GoodsDAO::setStatus(int goodsId, const QString &status, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE goods SET status = ?, update_time = datetime('now','localtime') WHERE id = ?");
+    q.addBindValue(status);
+    q.addBindValue(goodsId);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    return true;
+}
 
 
 

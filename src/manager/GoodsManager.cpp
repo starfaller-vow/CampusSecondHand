@@ -140,19 +140,101 @@ bool GoodsManager::publishGoods(int sellerId,
 
 // ==================== 编辑 ====================
 
+bool GoodsManager::editGoods(int goodsId, int operatorId,
+                             const QString &title, const QString &desc,
+                             double originalPrice, const QString &condition,
+                             double currentPrice, int categoryId,
+                             const QString &contact,
+                             const QStringList &imageLocalPaths,
+                             QString &errorMsg)
+{
+    Goods existing = GoodsDAO::getById(goodsId);
+    if (existing.id == 0) {
+        errorMsg = QStringLiteral("商品不存在");
+        return false;
+    }
+    if (existing.sellerId != operatorId) {
+        errorMsg = QStringLiteral("无权编辑该商品");
+        return false;
+    }
 
+    // 交易中（reserved/sold/off_shelf）不可编辑
+    if (!existing.isOnSale()) {
+        errorMsg = QStringLiteral("该商品状态下不可编辑（仅在售状态可编辑）");
+        return false;
+    }
+
+    // 基础校验
+    if (title.trimmed().isEmpty())      { errorMsg = QStringLiteral("标题不能为空"); return false; }
+    if (desc.trimmed().isEmpty())       { errorMsg = QStringLiteral("描述不能为空"); return false; }
+    if (originalPrice <= 0)             { errorMsg = QStringLiteral("原价必须大于0"); return false; }
+    if (currentPrice <= 0)              { errorMsg = QStringLiteral("现价必须大于0"); return false; }
+    if (imageLocalPaths.size() > 5) { errorMsg = QStringLiteral("最多上传5张图片"); return false; }
+
+    QString hit;
+    if (containsSensitiveWord(title, hit))   { errorMsg = QStringLiteral("标题包含敏感词"); return false; }
+    if (containsSensitiveWord(desc, hit))    { errorMsg = QStringLiteral("描述包含敏感词"); return false; }
+    if (containsSensitiveWord(contact, hit)) { errorMsg = QStringLiteral("联系方式包含敏感词"); return false; }
+
+    QString imagesJson = existing.imagesJson;
+    if (!imageLocalPaths.isEmpty()) {
+        imagesJson = copyImagesAndMakeJson(imageLocalPaths, errorMsg);
+        if (imagesJson.isEmpty()) return false;
+    }
+
+    existing.title         = title.trimmed();
+    existing.description   = desc.trimmed();
+    existing.originalPrice = originalPrice;
+    existing.condition     = condition;
+    existing.currentPrice  = currentPrice;
+    existing.categoryId    = categoryId;
+    existing.imagesJson    = imagesJson;
+
+    return GoodsDAO::update(existing, errorMsg);
+}
 
 // ==================== 状态操作 ====================
 
+bool GoodsManager::offShelf(int goodsId, int operatorId, QString &errorMsg)//`operatorId`：操作人的用户 ID（当前登录用户）
+{
+    Goods g = GoodsDAO::getById(goodsId);
+    if (g.id == 0) { errorMsg = QStringLiteral("商品不存在"); return false; }
+    if (g.sellerId != operatorId) { errorMsg = QStringLiteral("无权操作"); return false; }
+    return GoodsDAO::setStatus(goodsId, "off_shelf", errorMsg);
+}
 
-
-
+bool GoodsManager::onShelf(int goodsId, int operatorId, QString &errorMsg)
+{
+    Goods g = GoodsDAO::getById(goodsId);
+    if (g.id == 0) { errorMsg = QStringLiteral("商品不存在"); return false; }
+    if (g.sellerId != operatorId) { errorMsg = QStringLiteral("无权操作"); return false; }
+    if (g.isReserved()) { errorMsg = QStringLiteral("商品已被预订，无法上架"); return false; }
+    // 被举报下架的商品：卖家不能自行重新上架，只能由管理员在举报中心恢复
+    if (g.isReportOff()) {
+        errorMsg = QStringLiteral("商品因举报被下架，请联系管理员申请恢复");
+        return false;
+    }
+    return GoodsDAO::setStatus(goodsId, "on_sale", errorMsg);
+}
 
 
 
 // ==================== 删除 ====================
 
-
+bool GoodsManager::deleteGoods(int goodsId, int operatorId, QString &errorMsg)
+{
+    Goods g = GoodsDAO::getById(goodsId);
+    if (g.id == 0) { errorMsg = QStringLiteral("商品不存在"); return false; }
+    if (g.sellerId != operatorId) {
+        // 管理员也可以删
+        User u = UserDAO::getById(operatorId);
+        if (!u.isAdmin()) {
+            errorMsg = QStringLiteral("无权删除该商品");
+            return false;
+        }
+    }
+    return GoodsDAO::deleteById(goodsId, errorMsg);
+}
 
 // ==================== 查询 ====================
 

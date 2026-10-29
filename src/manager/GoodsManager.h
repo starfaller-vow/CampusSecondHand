@@ -28,10 +28,20 @@ public:
                       QString &errorMsg);
 
     // ===== 编辑 =====
+    bool editGoods(int goodsId, int operatorId,  // operatorId 必须是卖家
+                   const QString &title, const QString &desc,
+                   double originalPrice, const QString &condition,
+                   double currentPrice, int categoryId,
+                   const QString &contact,
+                   const QStringList &imageLocalPaths,
+                   QString &errorMsg);
 
     // ===== 状态操作 =====
+    bool offShelf(int goodsId, int operatorId, QString &errorMsg);
+    bool onShelf(int goodsId, int operatorId, QString &errorMsg);
 
     // ===== 删除 =====
+    bool deleteGoods(int goodsId, int operatorId, QString &errorMsg);
 
     // ===== 查询 =====
     QList<Goods> browseOnSale(const GoodsDAO::QueryOptions &opt);

@@ -279,13 +279,47 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
         return QJsonObject{ {"goodsId", 0} };
     }
 
+    if (cmd == cs::cmd::EditGoods) {
+        Goods existing = GoodsDAO::getById(p.value("goodsId").toInt());
+        if (existing.id == 0) { err = QStringLiteral("商品不存在"); return {}; }
+        if (existing.sellerId != uid) { err = QStringLiteral("无权编辑该商品"); return {}; }
+        if (!existing.isOnSale()) { err = QStringLiteral("该商品状态下不可编辑（仅在售状态可编辑）"); return {}; }
 
+        existing.title         = p.value("title").toString().trimmed();
+        existing.description   = p.value("description").toString().trimmed();
+        existing.originalPrice = p.value("originalPrice").toDouble();
+        existing.condition     = p.value("condition").toString();
+        existing.currentPrice  = p.value("currentPrice").toDouble();
+        existing.categoryId    = p.value("categoryId").toInt();
+        // 图片沿用已有；若客户端上传了新图，则替换
+        const QJsonArray names = p.value("images").toArray();
+        if (!names.isEmpty()) {
+            QJsonArray imgArr;
+            for (const auto &v : names) {
+                const QString fname = QFileInfo(v.toString()).fileName();
+                imgArr.append(QStringLiteral("images/%1").arg(fname));
+            }
+            existing.imagesJson = QString::fromUtf8(
+                QJsonDocument(imgArr).toJson(QJsonDocument::Compact));
+        }
+        if (!GoodsDAO::update(existing, err)) return {};
+        return QJsonObject{};
+    }
 
+    if (cmd == cs::cmd::DeleteGoods) {
+        if (!GoodsManager::instance().deleteGoods(p.value("goodsId").toInt(), uid, err)) return {};
+        return QJsonObject{};
+    }
 
+    if (cmd == cs::cmd::OffShelf) {
+        if (!GoodsManager::instance().offShelf(p.value("goodsId").toInt(), uid, err)) return {};
+        return QJsonObject{};
+    }
 
-
-
-
+    if (cmd == cs::cmd::OnShelf) {
+        if (!GoodsManager::instance().onShelf(p.value("goodsId").toInt(), uid, err)) return {};
+        return QJsonObject{};
+    }
 
     // ==================== 收藏 ====================
 

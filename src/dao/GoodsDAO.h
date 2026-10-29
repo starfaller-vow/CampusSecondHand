@@ -32,8 +32,11 @@ public:
 
     // ===== 增删改 =====
     static bool insert(const Goods &g, QString &errorMsg);
+    static bool update(const Goods &g, QString &errorMsg);
+    static bool deleteById(int id, QString &errorMsg);  // 硬删除
 
     // ===== 状态流转 =====
+    static bool setStatus(int goodsId, const QString &status, QString &errorMsg);
 
     // ===== 在售商品被付款后锁定 =====
 
