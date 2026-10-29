@@ -194,7 +194,18 @@ bool UserDAO::updateBalance(int userId, double newBalance, QString &errorMsg)
     return true;
 }
 
-
+bool UserDAO::updateStatus(int userId, const QString &status, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE users SET status = ? WHERE id = ?");
+    q.addBindValue(status);
+    q.addBindValue(userId);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    return true;
+}
 
 bool UserDAO::updateContact(int userId, const QString &contact, QString &errorMsg)
 {

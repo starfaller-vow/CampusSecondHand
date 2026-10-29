@@ -1,8 +1,7 @@
-# 校园二手交易系统：06 卖家商品维护
+# 校园二手交易系统：07 管理员用户治理
 
-负责人：宋成浩。本目录为累计源码快照，前置功能、新增功能与边界见本次提交说明。
+负责人：黄广淼。本目录为累计源码快照，前置功能、新增功能与边界见本次提交说明。
 
-使用 VS2026 的“打开文件夹”打开本目录，保持与原项目相同的 Qt/C++ 开发环境。三份 CMake 配置文件已从原 RAR 原样恢复，使用 Ninja、x64，提供 Qt-Debug 和 Qt-Release 预设，输出目录分别为 out/build/debug 和 out/build/release。
 
 Qt 安装路径保留在 CMakeUserPresets.json 的 QT653 预设的 QTDIR 环境变量中：D:/QT/6.5.3/msvc2019_64。
 
@@ -17,4 +16,4 @@ cmake --preset Qt-Release
 cmake --build out/build/release
 ```
 
-原配置没有 buildPresets，因此这里不使用 cmake --build --preset。切换 Debug 时改用 Qt-Debug 和 out/build/debug。
+

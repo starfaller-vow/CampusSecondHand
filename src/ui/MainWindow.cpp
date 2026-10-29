@@ -748,6 +748,108 @@ void MainWindow::setupUI()
         auto *adminTabs = new QTabWidget(m_tabAdmin);
         adminL->addWidget(adminTabs);
 
+        // ===== 子Tab 1: 用户管理 =====
+        {
+            auto *page = new QWidget();
+            auto *l = new QVBoxLayout(page);
+            auto *btnBar = new QHBoxLayout();
+            auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新"));
+            btnBar->addWidget(refreshBtn);
+            btnBar->addStretch();
+            l->addLayout(btnBar);
+
+            auto *table = new QTableWidget(page);
+            table->setColumnCount(7);//7列
+            table->setHorizontalHeaderLabels(QStringList{
+                QStringLiteral("ID"), QStringLiteral("用户名"), QStringLiteral("学号"),
+                QStringLiteral("角色"), QStringLiteral("余额"), QStringLiteral("状态"), QStringLiteral("操作")
+            });
+            table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+            table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+            table->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+            table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            l->addWidget(table);
+
+            auto refreshUsers = std::make_shared<std::function<void()>>();//用来存刷新函数
+            *refreshUsers = [this, table, refreshUsers]() {
+                table->setRowCount(0);
+
+                // C/S：从服务端拉取全部用户
+                QJsonObject data;
+                QString err;
+                if (!ClientConnector::instance().request(cs::cmd::ListUsers, {}, data, err)) {
+                    QMessageBox::warning(this, QStringLiteral("失败"), err);
+                    return;
+                }
+                QList<User> users;
+                for (const auto &v : data.value("users").toArray()) {
+                    users.append(jsoncv::userFromJson(v.toObject()));
+                }
+
+                for (const User &u : users) {
+                    int row = table->rowCount();
+                    table->insertRow(row);
+                    table->setItem(row, 0, new QTableWidgetItem(QString::number(u.id)));
+                    table->setItem(row, 1, new QTableWidgetItem(u.username));
+                    table->setItem(row, 2, new QTableWidgetItem(u.studentNo));
+                    table->setItem(row, 3, new QTableWidgetItem(
+                        u.isAdmin() ? QStringLiteral("🛡️ 管理员") : QStringLiteral("👤 普通")));
+                    table->setItem(row, 4, new QTableWidgetItem(
+                        QStringLiteral("¥%1").arg(u.balance, 0, 'f', 2)));
+
+                    QString statusText, statusColor;
+                    if (u.isActive())      { statusText = QStringLiteral("✅ 正常");  statusColor = "#2E7D32"; }
+                    else if (u.isBanned()) { statusText = QStringLiteral("🚫 封禁");  statusColor = "#C62828"; }
+                    else                   { statusText = QStringLiteral("🗑️ 注销");  statusColor = "#757575"; }
+                    auto *si = new QTableWidgetItem(statusText);
+                    si->setForeground(QColor(statusColor));
+                    table->setItem(row, 5, si);
+
+                    auto *bw = new QWidget();
+                    auto *bl = new QHBoxLayout(bw);
+                    bl->setContentsMargins(2, 2, 2, 2);
+                    bl->setSpacing(4);
+
+                    if (u.isBanned()) {
+                        auto *ub = new QPushButton(QStringLiteral("解封"));
+                        ub->setStyleSheet("background:#4CAF50;color:white;padding:2px 8px;border-radius:3px;");// 设置样式：绿色背景、白色文字、内边距、圆角
+                        connect(ub, &QPushButton::clicked, this, [this, u, refreshUsers]() {
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::UnbanUser,
+                                    QJsonObject{ {"userId", u.id} }, rdata, err)) {
+                                (*refreshUsers)();
+                            } else {
+                                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                            }
+                        });
+                        bl->addWidget(ub);
+                    } else if (u.isActive() && !u.isAdmin()) {
+                        auto *bb = new QPushButton(QStringLiteral("封禁"));
+                        bb->setStyleSheet("background:#F44336;color:white;padding:2px 8px;border-radius:3px;");
+                        connect(bb, &QPushButton::clicked, this, [this, u, refreshUsers]() {
+                            auto ret = QMessageBox::warning(this, QStringLiteral("确认"),
+                                QStringLiteral("确定封禁用户 %1？其在售商品将自动下架。").arg(u.username),
+                                QMessageBox::Yes | QMessageBox::No);
+                            if (ret != QMessageBox::Yes) return;
+                            // C/S：封禁 + 自动下架 + 会话失效全部由服务端原子完成
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::BanUser,
+                                    QJsonObject{ {"userId", u.id} }, rdata, err)) {
+                                (*refreshUsers)();
+                            } else QMessageBox::warning(this, QStringLiteral("失败"), err);
+                        });
+                        bl->addWidget(bb);//// 封禁按钮加入布局
+                    }
+                    table->setCellWidget(row, 6, bw);//// 将这个装有按钮的容器控件bw，放到第6列（操作列）当前行单元格
+                }
+            };
+            connect(refreshBtn, &QPushButton::clicked, [refreshUsers]() { (*refreshUsers)(); });//// 绑定顶部【刷新按钮】点击事件：点击就执行刷新函数
+            registerLazy(page, *refreshUsers);
+            adminTabs->addTab(page, QStringLiteral("👥 用户管理"));
+        }
+
         // ===== 子Tab 2: 分类管理 =====
         {
             auto *page = new QWidget();
@@ -1032,6 +1134,12 @@ void MainWindow::setupUI()
             // 200ms 防抖合并，避免推送风暴触发请求风暴
             if (m_msgDebounceTimer) m_msgDebounceTimer->start(200);
             statusBar()->showMessage(QStringLiteral("📨 收到新消息，请查看「我的消息」"), 3000);
+        } else if (type == cs::push::Kick) {
+            // 被管理员封禁：弹窗提示后断开并退回登录窗口
+            backToLogin(QStringLiteral("账号被封禁"),
+                data.value("reason").toString().isEmpty()
+                    ? QStringLiteral("您的账号已被管理员封禁，请联系管理员。")
+                    : data.value("reason").toString());
         }
     });
 
