@@ -41,12 +41,16 @@ public:
                    User &outUser, QString &errorMsg);
 
     // ===== 管理员操作 =====
+    bool banUser(int userId, QString &errorMsg);
+    bool unbanUser(int userId, QString &errorMsg);
+    bool deleteUser(int userId, QString &errorMsg);  // 软删除
     QList<User> listAllUsers();
 
     // ===== 个人信息 =====
     bool changeContact(int userId, const QString &contact, QString &errorMsg);
     bool changePassword(int userId, const QString &oldPwd,
                         const QString &newPwd, QString &errorMsg);
+    bool cancelAccount(int userId, QString &errorMsg);  // 注销=软删除
 
     // ===== 查询 =====
     User getUser(int userId);

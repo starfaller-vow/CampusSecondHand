@@ -168,6 +168,9 @@ void GoodsDetailDialog::setupUI()
         m_favBtn = new QPushButton(QStringLiteral("收藏"), this);
         connect(m_favBtn, &QPushButton::clicked, this, &GoodsDetailDialog::onFavClicked);
         btnRow->addWidget(m_favBtn);
+        auto *reportBtn = new QPushButton(QStringLiteral("举报"), this);
+        connect(reportBtn, &QPushButton::clicked, this, &GoodsDetailDialog::onReportGoods);
+        btnRow->addWidget(reportBtn);
     }
     btnRow->addStretch();
 
@@ -327,6 +330,64 @@ void GoodsDetailDialog::onFavClicked()
     }
 }
 
+void GoodsDetailDialog::onReportGoods()
+{
+    // 简化版举报弹窗
+    QDialog *dlg = new QDialog(this);
+    dlg->setWindowTitle(QStringLiteral("🚩 举报商品"));
+    dlg->resize(400, 320);
 
+    auto *layout = new QVBoxLayout(dlg);
+
+    auto *typeLabel = new QLabel(QStringLiteral("举报类型："), dlg);
+    auto *typeCombo = new QComboBox(dlg);
+    typeCombo->addItem(QStringLiteral("虚假商品"));
+    typeCombo->addItem(QStringLiteral("描述不符"));
+    typeCombo->addItem(QStringLiteral("欺诈行为"));
+    typeCombo->addItem(QStringLiteral("其他"));
+
+    auto *descLabel = new QLabel(QStringLiteral("详细描述（至少10字）："), dlg);
+    auto *descEdit = new QTextEdit(dlg);
+    descEdit->setPlaceholderText(QStringLiteral("请具体描述问题..."));
+
+    auto *btnRow = new QHBoxLayout();
+    auto *cancelBtn = new QPushButton(QStringLiteral("取消"), dlg);
+    auto *submitBtn = new QPushButton(QStringLiteral("提交举报"), dlg);
+    connect(cancelBtn, &QPushButton::clicked, dlg, &QDialog::reject);
+
+    connect(submitBtn, &QPushButton::clicked, this, [=]() {
+        QString desc = descEdit->toPlainText().trimmed();
+        if (desc.length() < 10) {
+            QMessageBox::warning(dlg, QStringLiteral("提示"), QStringLiteral("详细描述至少10字"));
+            return;
+        }
+        // C/S：举报走服务端
+        QJsonObject d; QString err;
+        if (ClientConnector::instance().request(cs::cmd::ReportSubmit,
+                QJsonObject{
+                    {"targetType", "goods"},
+                    {"targetId", m_goods.id},
+                    {"reasonType", typeCombo->currentText()},
+                    {"description", desc}
+                }, d, err)) {
+            QMessageBox::information(dlg, QStringLiteral("提交成功"),
+                                     QStringLiteral("举报已提交，管理员会尽快处理"));
+            dlg->accept();
+        } else {
+            QMessageBox::critical(dlg, QStringLiteral("失败"), err);
+        }
+    });
+
+    btnRow->addWidget(cancelBtn);
+    btnRow->addWidget(submitBtn);
+
+    layout->addWidget(typeLabel);
+    layout->addWidget(typeCombo);
+    layout->addWidget(descLabel);
+    layout->addWidget(descEdit);
+    layout->addLayout(btnRow);
+
+    dlg->exec();
+}
 
 

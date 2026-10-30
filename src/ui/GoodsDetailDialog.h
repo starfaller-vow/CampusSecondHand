@@ -19,6 +19,7 @@ private slots:
     void onPrevImage();
     void onNextImage();
     void onFavClicked();
+    void onReportGoods();
 
 private:
     void setupUI();

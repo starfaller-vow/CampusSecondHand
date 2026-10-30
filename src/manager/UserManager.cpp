@@ -90,11 +90,20 @@ bool UserManager::loginUser(const QString &username, const QString &password,
 
 // ==================== 管理员操作 ====================
 
+bool UserManager::banUser(int userId, QString &errorMsg)
+{
+    return UserDAO::updateStatus(userId, "banned", errorMsg);
+}
 
+bool UserManager::unbanUser(int userId, QString &errorMsg)
+{
+    return UserDAO::updateStatus(userId, "active", errorMsg);
+}
 
-
-
-
+bool UserManager::deleteUser(int userId, QString &errorMsg)
+{
+    return UserDAO::updateStatus(userId, "deleted", errorMsg);
+}
 
 QList<User> UserManager::listAllUsers()
 {
@@ -130,7 +139,10 @@ bool UserManager::changePassword(int userId, const QString &oldPwd,
     return UserDAO::updatePassword(userId, UserDAO::hashPassword(newPwd), errorMsg);
 }
 
-
+bool UserManager::cancelAccount(int userId, QString &errorMsg)
+{
+    return UserDAO::updateStatus(userId, "deleted", errorMsg);
+}
 
 // ==================== 查询 ====================
 

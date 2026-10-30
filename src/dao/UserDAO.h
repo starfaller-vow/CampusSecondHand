@@ -49,6 +49,7 @@ public:
 
     // ===== 更新 =====
     static bool updateBalance(int userId, double newBalance, QString &errorMsg);
+    static bool updateStatus(int userId, const QString &status, QString &errorMsg);
     static bool updateContact(int userId, const QString &contact, QString &errorMsg);
     static bool updatePassword(int userId, const QString &newPasswordHash, QString &errorMsg);
 

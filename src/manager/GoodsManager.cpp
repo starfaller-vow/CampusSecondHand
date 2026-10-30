@@ -252,4 +252,13 @@ QList<Goods> GoodsManager::myGoods(int sellerId)
 
 // ==================== 卖家封禁时自动下架 ====================
 
-
+void GoodsManager::autoOffShelfBySeller(int sellerId)
+{
+    QList<Goods> list = GoodsDAO::getBySeller(sellerId);
+    for (const Goods &g : list) {
+        if (g.isOnSale()) {
+            QString err;
+            GoodsDAO::setStatus(g.id, "off_shelf", err);
+        }
+    }
+}

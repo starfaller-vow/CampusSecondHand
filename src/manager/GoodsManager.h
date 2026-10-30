@@ -48,6 +48,7 @@ public:
     QList<Goods> myGoods(int sellerId);
 
     // ===== 卖家封禁时自动下架 =====
+    void autoOffShelfBySeller(int sellerId);
 
     // ===== 敏感词检查 =====
     static bool containsSensitiveWord(const QString &text, QString &hitWord);

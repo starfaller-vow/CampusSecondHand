@@ -17,6 +17,7 @@
 #include "CategoriesDAO.h"
 #include "FavoritesDAO.h"
 #include "MessagesDAO.h"
+#include "ReportsDAO.h"
 #include "RedeemCodesDAO.h"
 #include "BalanceLogsDAO.h"
 #include "SettingsDAO.h"
@@ -421,18 +422,52 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
 
     // ==================== 举报（提交人人可为）====================
 
-
+    if (cmd == cs::cmd::ReportSubmit) {
+        Report r;
+        r.reporterId  = uid;
+        r.targetType  = p.value("targetType").toString();
+        r.targetId    = p.value("targetId").toInt();
+        r.reasonType  = p.value("reasonType").toString();
+        r.description = p.value("description").toString().trimmed();
+        if (r.description.size() < 10) {
+            err = QStringLiteral("详细描述至少10字"); return {};
+        }
+        if (!ReportsDAO::insert(r, err)) return {};
+        return QJsonObject{};
+    }
 
     // ==================== 管理员专区 ====================
     if (!requireAdmin(*this, token, uid, err)) return {};
 
+    if (cmd == cs::cmd::ListUsers) {
+        QJsonArray arr;
+        for (const User &u : UserManager::instance().listAllUsers()) {
+            arr.append(jsoncv::userToJson(u));
+        }
+        return QJsonObject{ {"users", arr} };
+    }
 
+    if (cmd == cs::cmd::BanUser) {
+        const int targetId = p.value("userId").toInt();
+        if (!UserManager::instance().banUser(targetId, err)) return {};
+        // 封禁联动：在售商品自动下架 + 现有会话失效
+        GoodsManager::instance().autoOffShelfBySeller(targetId);
+        revokeTokensOfUser(targetId);
+        // M6：向被禁用户的在线连接实时推送踢下线（客户端收到后弹窗并退回登录窗）
+        PushRegistry::instance().pushToUser(targetId, cs::push::Kick,
+            QJsonObject{ {"reason", QStringLiteral("您的账号已被管理员封禁，请联系管理员。")} });
+        return QJsonObject{};
+    }
 
+    if (cmd == cs::cmd::UnbanUser) {
+        if (!UserManager::instance().unbanUser(p.value("userId").toInt(), err)) return {};
+        return QJsonObject{};
+    }
 
-
-
-
-
+    if (cmd == cs::cmd::DeleteUser) {
+        if (!UserManager::instance().deleteUser(p.value("userId").toInt(), err)) return {};
+        return QJsonObject{};
+    }
 
     // ---- 分类管理 ----
     if (cmd == cs::cmd::CategoryAdd) {
