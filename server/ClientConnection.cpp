@@ -36,6 +36,7 @@ bool isReadOnlyCommand(const QString &cmd)
         cs::cmd::FavoriteList,
         cs::cmd::MessageList,
         cs::cmd::MessageUnread,
+        cs::cmd::ReportList,
         cs::cmd::BalanceLogs,
         cs::cmd::SettingsGet,
         cs::cmd::ListUsers,

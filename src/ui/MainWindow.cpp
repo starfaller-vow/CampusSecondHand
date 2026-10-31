@@ -1094,6 +1094,212 @@ void MainWindow::setupUI()
             adminTabs->addTab(page, QStringLiteral("🎁 充值码生成"));
         }
 
+        // ===== 子Tab 5: 举报中心 =====
+        {
+            auto *page = new QWidget();
+            auto *l = new QVBoxLayout(page);
+            auto *bar = new QHBoxLayout();
+            auto *statusFilter = new QComboBox();//状态下拉选择框 QComboBox
+            statusFilter->addItem(QStringLiteral("全部"), "");
+            statusFilter->addItem(QStringLiteral("🟡 待处理"),   "pending");
+            statusFilter->addItem(QStringLiteral("✅ 已解决"),   "resolved");
+            statusFilter->addItem(QStringLiteral("❌ 已驳回"),   "rejected");
+            statusFilter->addItem(QStringLiteral("↩️ 已退款"),   "refunded");
+            auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新"));
+            bar->addWidget(new QLabel(QStringLiteral("状态：")));
+            bar->addWidget(statusFilter);
+            bar->addWidget(refreshBtn);
+            bar->addStretch();
+            l->addLayout(bar);
+
+            auto *table = new QTableWidget(page);
+            table->setColumnCount(6);
+            table->setHorizontalHeaderLabels(QStringList{
+                QStringLiteral("ID"), QStringLiteral("目标"), QStringLiteral("原因"),
+                QStringLiteral("描述"), QStringLiteral("状态"), QStringLiteral("操作")
+            });
+            table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+            table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            table->setWordWrap(true);
+            l->addWidget(table);
+            //**刷新回调函数**
+            auto refreshReports = std::make_shared<std::function<void()>>();
+            *refreshReports = [this, table, statusFilter, refreshReports]() {
+                table->setRowCount(0);
+                QString filter = statusFilter->currentData().toString();
+
+                // C/S：按状态筛选拉取举报列表
+                QJsonObject data;
+                QString err;
+                if (!ClientConnector::instance().request(cs::cmd::ReportList,
+                        QJsonObject{ {"status", filter} }, data, err)) {
+                    QMessageBox::warning(this, QStringLiteral("失败"), err);
+                    return;
+                }
+                QList<Report> reports;
+                for (const auto &v : data.value("reports").toArray()) {
+                    reports.append(jsoncv::reportFromJson(v.toObject()));
+                }
+
+                for (const Report &r : reports) {
+                    int row = table->rowCount();
+                    table->insertRow(row);
+                    table->setItem(row, 0, new QTableWidgetItem(QString::number(r.id)));
+                    // 目标列：商品举报显示"标题 (#id)"一眼可辨（标题已由列表接口附带，无需逐行请求）；
+                    // 商品已删除或非商品举报时回退 goods#id 原始标记
+                    QString targetText;
+                    if (r.targetType == "goods" && !r.targetTitle.isEmpty()) {
+                        targetText = QStringLiteral("%1 (#%2)").arg(r.targetTitle).arg(r.targetId);
+                    } else {
+                        targetText = r.targetType + "#" + QString::number(r.targetId);
+                    }
+                    auto *targetItem = new QTableWidgetItem(targetText);
+                    targetItem->setData(Qt::UserRole, r.targetId);//点击目标列时用来打开商品详情
+                    table->setItem(row, 1, targetItem);//【目标】列
+                    table->setItem(row, 2, new QTableWidgetItem(r.reasonType));//原因
+                    auto *descItem = new QTableWidgetItem(r.description);//描述
+                    descItem->setToolTip(r.description);
+                    table->setItem(row, 3, descItem);
+
+                    QString stText, stColor;//状态
+                    if (r.status == "pending")  { stText = QStringLiteral("🟡 待处理");  stColor = "#F9A825"; }
+                    else if (r.status == "resolved"){ stText = QStringLiteral("✅ 已解决");  stColor = "#2E7D32"; }
+                    else if (r.status == "rejected"){ stText = QStringLiteral("❌ 已驳回");  stColor = "#757575"; }
+                    else if (r.status == "refunded"){ stText = QStringLiteral("↩️ 已退款");  stColor = "#1565C0"; }
+                    else { stText = r.status; stColor = "#000"; }
+                    auto *si = new QTableWidgetItem(stText);
+                    si->setForeground(QColor(stColor));
+                    table->setItem(row, 4, si);
+
+                    auto *bw = new QWidget();//准备操作列的容器
+                    auto *bl = new QHBoxLayout(bw);
+                    bl->setContentsMargins(2, 2, 2, 2);
+                    bl->setSpacing(4);
+
+                    if (r.status == "pending") {
+                        auto *resolveBtn = new QPushButton(QStringLiteral("处理"));
+                        resolveBtn->setStyleSheet("background:#4CAF50;color:white;padding:2px 8px;border-radius:3px;");
+                        connect(resolveBtn, &QPushButton::clicked, this, [this, r, refreshReports]() {
+                            // 二次确认：处理将可能下架商品
+                            auto ret = QMessageBox::warning(this, QStringLiteral("确认处理"),
+                                QStringLiteral("确定处理该举报？\n若商品仍在售，将被下架并通知卖家；卖家无法自行重新上架。"),
+                                QMessageBox::Yes | QMessageBox::No);
+                            if (ret != QMessageBox::Yes) return;
+
+                            bool ok;
+                            QString note = QInputDialog::getMultiLineText(this, QStringLiteral("处理举报"),
+                                QStringLiteral("请输入处理备注："), QString(), &ok);
+                            if (!ok) return;
+
+                            // C/S：举报标记 resolved + 商品下架 + 通知卖家由服务端事务原子完成
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::ReportHandle, QJsonObject{
+                                    {"reportId", r.id}, {"newStatus", "resolved"}, {"note", note}
+                                }, rdata, err)) {
+                                QMessageBox::information(this, QStringLiteral("处理完成"),
+                                    QStringLiteral("举报已处理，若商品仍在售则已同步下架并通知卖家。"));
+                                (*refreshReports)();
+                            } else {
+                                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                            }
+                        });
+                        bl->addWidget(resolveBtn);
+
+                        //驳回按钮部分
+                        auto *rejectBtn = new QPushButton(QStringLiteral("驳回"));
+                        rejectBtn->setStyleSheet("background:#9E9E9E;color:white;padding:2px 8px;border-radius:3px;");
+                        connect(rejectBtn, &QPushButton::clicked, this, [this, r, refreshReports]() {
+                            bool ok;
+                            QString note = QInputDialog::getMultiLineText(this, QStringLiteral("驳回举报"),
+                                QStringLiteral("请输入驳回理由："), QString(), &ok);
+                            if (!ok) return;
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::ReportHandle, QJsonObject{
+                                    {"reportId", r.id}, {"newStatus", "rejected"}, {"note", note}
+                                }, rdata, err)) {
+                                (*refreshReports)();
+                            } else {
+                                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                            }
+                        });
+                        bl->addWidget(rejectBtn);
+                    }
+
+                    // 已解决/已退款的商品举报：可按商品状态执行 强制退款 / 强制下架 / 恢复上架
+                    if ((r.status == "resolved" || r.status == "refunded") && r.targetType == "goods") {
+
+
+                        // 商品仍存在 → 在售可强制下架；举报下架中可恢复上架（状态由列表接口附带）
+                        if (r.targetExists) {
+                            if (r.targetStatus == "on_sale") {
+                                auto *offBtn = new QPushButton(QStringLiteral("🚫 强制下架"));
+                                offBtn->setStyleSheet("background:#E65100;color:white;padding:2px 8px;border-radius:3px;");
+                                connect(offBtn, &QPushButton::clicked, this, [this, r, refreshReports]() {
+                                    QJsonObject rdata;
+                                    QString err;
+                                    if (ClientConnector::instance().request(cs::cmd::ForceOffReport,
+                                            QJsonObject{ {"goodsId", r.targetId} }, rdata, err)) {
+                                        QMessageBox::information(this, QStringLiteral("成功"),
+                                            QStringLiteral("商品已强制下架并标记举报"));
+                                        (*refreshReports)();
+                                    } else {
+                                        QMessageBox::warning(this, QStringLiteral("失败"), err);
+                                    }
+                                });
+                                bl->addWidget(offBtn);
+                            } else if (r.targetStatus == "off_shelf" && r.targetOffReason == "report") {
+                                auto *restoreBtn = new QPushButton(QStringLiteral("恢复上架"));
+                                restoreBtn->setStyleSheet("background:#2196F3;color:white;padding:2px 8px;border-radius:3px;");
+                                connect(restoreBtn, &QPushButton::clicked, this, [this, r, refreshReports]() {
+                                    QJsonObject rdata;
+                                    QString err;
+                                    if (ClientConnector::instance().request(cs::cmd::RestoreReport,
+                                            QJsonObject{ {"goodsId", r.targetId} }, rdata, err)) {
+                                        QMessageBox::information(this, QStringLiteral("成功"),
+                                            QStringLiteral("商品已恢复上架并解除举报下架标记"));
+                                        (*refreshReports)();
+                                    } else {
+                                        QMessageBox::warning(this, QStringLiteral("失败"), err);
+                                    }
+                                });
+                                bl->addWidget(restoreBtn);
+                            }
+                        }
+                    }
+                    table->setCellWidget(row, 5, bw);
+                }
+            };
+
+            connect(refreshBtn, &QPushButton::clicked, [refreshReports]() { (*refreshReports)(); });//绑定【刷新】按钮点击事件
+            connect(statusFilter, QOverload<int>::of(&QComboBox::currentIndexChanged),//**切换下拉选项时，自动执行刷新**。
+                    [refreshReports](int) { (*refreshReports)(); });
+
+            // 点击"目标"列 → 以只读模式查看被举报商品详情（管理员审核用）
+            connect(table, &QTableWidget::cellClicked, this, [this, table](int row, int col) {
+                if (col != 1) return;//**只响应第 1 列（目标列）的点击**，点击其他列无任何反应
+                auto *item = table->item(row, 1);
+                if (!item) return;
+                int goodsId = item->data(Qt::UserRole).toInt();//获取单元格内预存的商品 ID
+                if (goodsId <= 0) return;
+                // C/S：先确认商品仍存在
+                QJsonObject gdata;
+                QString gerr;
+                if (!ClientConnector::instance().request(cs::cmd::GoodsDetail,
+                        QJsonObject{ {"goodsId", goodsId} }, gdata, gerr)) {
+                    QMessageBox::information(this, QStringLiteral("提示"),
+                        QStringLiteral("该商品已被删除"));
+                    return;
+                }
+                GoodsDetailDialog dlg(goodsId, m_user.id, this, true);
+                dlg.exec();
+            });
+
+            registerLazy(page, *refreshReports);
+            adminTabs->addTab(page, QStringLiteral("🚩 举报中心"));
+        }
+
         // 管理员面板懒加载：首次显示触发默认子页；切换子页时各自首次刷新
         registerLazy(m_tabAdmin, [adminTabs, runLazy]() { runLazy(adminTabs->currentWidget()); });
         connect(adminTabs, &QTabWidget::currentChanged, this,

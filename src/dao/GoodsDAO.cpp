@@ -187,8 +187,59 @@ bool GoodsDAO::setStatus(int goodsId, const QString &status, QString &errorMsg)
 
 
 
+bool GoodsDAO::offShelfByReport(int goodsId, QString &errorMsg)
+{
+    // 注意：此处不开事务——调用方（举报处理）已在事务中
+    // 乐观锁：仅当商品仍为 on_sale 时才下架，避免破坏进行中的交易
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE goods SET status = 'off_shelf', off_reason = 'report', "
+              "update_time = datetime('now','localtime') "
+              "WHERE id = ? AND status = 'on_sale'");
+    q.addBindValue(goodsId);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    if (q.numRowsAffected() != 1) {
+        errorMsg = QStringLiteral("商品未在售，无法下架");
+        return false;
+    }
+    return true;
+}
 
+bool GoodsDAO::restoreFromReport(int goodsId, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE goods SET status = 'on_sale', off_reason = '', "
+              "update_time = datetime('now','localtime') "
+              "WHERE id = ? AND off_reason = 'report'");
+    q.addBindValue(goodsId);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    if (q.numRowsAffected() != 1) {
+        errorMsg = QStringLiteral("商品不处于举报下架状态，无法恢复");
+        return false;
+    }
+    return true;
+}
 
-
-
-
+bool GoodsDAO::forceOffShelfReport(int goodsId, QString &errorMsg)
+{
+    // 无条件置为"举报下架"：调用方可能面对 reserved（交易中）等任意状态的商品，
+    // 因此不带状态前置条件；注意此函数不开事务
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE goods SET status = 'off_shelf', off_reason = 'report', "
+              "update_time = datetime('now','localtime') WHERE id = ?");
+    q.addBindValue(goodsId);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    if (q.numRowsAffected() != 1) {
+        errorMsg = QStringLiteral("商品不存在");
+        return false;
+    }
+    return true;
+}

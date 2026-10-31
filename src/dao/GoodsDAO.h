@@ -42,8 +42,11 @@ public:
 
     // ===== 举报下架 / 管理员恢复 =====
     // 仅当商品仍为 on_sale 时下架成功（乐观锁：1=成功下架，0=未在售没动）
+    static bool offShelfByReport(int goodsId, QString &errorMsg);
     // 无条件置为"举报下架"（不要求当前在售，供管理员强制退款/强制下架使用）
+    static bool forceOffShelfReport(int goodsId, QString &errorMsg);
     // 仅当商品 off_reason='report' 时恢复为 on_sale 并清空原因（返回1行才算成功）
+    static bool restoreFromReport(int goodsId, QString &errorMsg);
 };
 
 #endif // GOODSDAO_H

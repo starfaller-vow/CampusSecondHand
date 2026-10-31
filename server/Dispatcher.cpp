@@ -101,7 +101,20 @@ QJsonObject goodsJsonWithContext(const Goods &g)
 
 
 // 举报 JSON：附带被举报商品信息（举报中心列表直接显示，无需逐行请求商品详情）
-
+QJsonObject reportJsonWithContext(const Report &r)
+{
+    QJsonObject o = jsoncv::reportToJson(r);
+    if (r.targetType == "goods") {
+        const Goods g = GoodsDAO::getById(r.targetId);
+        o.insert("targetExists", g.id != 0);
+        if (g.id != 0) {
+            o.insert("targetTitle", g.title);
+            o.insert("targetStatus", g.status);
+            o.insert("targetOffReason", g.offReason);
+        }
+    }
+    return o;
+}
 
 } // namespace
 
@@ -534,13 +547,58 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     }
 
     // ---- 举报处理 ----
+    if (cmd == cs::cmd::ReportList) {
+        QJsonArray arr;
+        for (const Report &r : ReportsDAO::getAll(p.value("status").toString())) {
+            arr.append(reportJsonWithContext(r));
+        }
+        return QJsonObject{ {"reports", arr} };
+    }
 
+    if (cmd == cs::cmd::ReportHandle) {
+        const int reportId = p.value("reportId").toInt();
+        const QString newStatus = p.value("newStatus").toString();
+        const QString note = p.value("note").toString().trimmed();
 
+        // resolved：若目标是商品且在售 → 举报下架 + 通知卖家（消息由事务外发送）
+        if (newStatus == "resolved") {
+            Report r = ReportsDAO::getById(reportId);
+            if (r.targetType == "goods") {
+                Goods g = GoodsDAO::getById(r.targetId);
+                QString e2;
+                if (g.id != 0 && g.isOnSale()) {
+                    // 举报处理 + 下架 放一个事务里
+                    QSqlDatabase db = DatabaseManager::instance().db();
+                    if (db.transaction()) {
+                        ReportsDAO::handle(reportId, uid, "resolved", note, e2);
+                        if (!GoodsDAO::offShelfByReport(g.id, e2)) {
+                            db.rollback();
+                            err = e2; return {};
+                        }
+                        db.commit();
+                        MessagesDAO::insert(g.sellerId,
+                            QStringLiteral("🚩 商品因举报被下架"),
+                            QStringLiteral("你的商品「%1」经管理员审核后已被下架，暂时无法自行重新上架。\n处理备注：%2")
+                                .arg(g.title, note.isEmpty() ? QStringLiteral("（无）") : note),
+                            "system");
+                        return QJsonObject{};
+                    }
+                }
+            }
+        }
+        if (!ReportsDAO::handle(reportId, uid, newStatus, note, err)) return {};
+        return QJsonObject{};
+    }
 
+    if (cmd == cs::cmd::ForceOffReport) {
+        if (!GoodsDAO::forceOffShelfReport(p.value("goodsId").toInt(), err)) return {};
+        return QJsonObject{};
+    }
 
-
-
-
+    if (cmd == cs::cmd::RestoreReport) {
+        if (!GoodsDAO::restoreFromReport(p.value("goodsId").toInt(), err)) return {};
+        return QJsonObject{};
+    }
 
     // ---- 交易管理 ----
 
