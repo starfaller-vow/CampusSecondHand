@@ -1,6 +1,7 @@
 #include "ServerApp.h"
 #include "ClientConnection.h"
 #include "DbLock.h"
+#include "TransactionsManager.h"
 
 #include <QThread>
 #include <QTimer>

@@ -18,6 +18,7 @@ public:
 private slots:
     void onPrevImage();
     void onNextImage();
+    void onBuyClicked();
     void onFavClicked();
     void onReportGoods();
 

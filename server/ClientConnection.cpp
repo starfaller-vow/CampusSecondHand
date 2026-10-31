@@ -36,8 +36,11 @@ bool isReadOnlyCommand(const QString &cmd)
         cs::cmd::FavoriteList,
         cs::cmd::MessageList,
         cs::cmd::MessageUnread,
+        cs::cmd::ReportList,
         cs::cmd::BalanceLogs,
         cs::cmd::SettingsGet,
+        cs::cmd::MyBuys,
+        cs::cmd::MySales,
         cs::cmd::ListUsers,
     };
     return kReadOnly.contains(cmd);
