@@ -127,7 +127,30 @@ QList<Transaction> TransactionsDAO::getPaidExpired(int days)
     return list;
 }
 
-
+QList<Transaction> TransactionsDAO::getByStatus(const QString &status)
+{
+    QList<Transaction> list;
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("SELECT * FROM transactions WHERE status = ? ORDER BY id DESC");
+    q.addBindValue(status);
+    if (q.exec()) {
+        while (q.next()) {
+            Transaction t;
+            t.id           = q.value("id").toInt();
+            t.buyerId      = q.value("buyer_id").toInt();
+            t.sellerId     = q.value("seller_id").toInt();
+            t.goodsId      = q.value("goods_id").toInt();
+            t.status       = q.value("status").toString();
+            t.remark       = q.value("remark").toString();
+            t.feeAmount    = q.value("fee_amount").toDouble();
+            t.feeRefunded  = q.value("fee_refunded").toInt();
+            t.createTime   = q.value("create_time").toString();
+            t.finishTime   = q.value("finish_time").toString();
+            list.append(t);
+        }
+    }
+    return list;
+}
 
 bool TransactionsDAO::insert(Transaction &t, QString &errorMsg)
 {

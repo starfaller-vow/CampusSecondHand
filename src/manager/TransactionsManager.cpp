@@ -176,7 +176,18 @@ bool TransactionsManager::cancelTransaction(int transactionId, int operatorId,//
 
 // ==================== 管理员强制退款 ====================
 
-
+bool TransactionsManager::refundByAdmin(int transactionId, int adminId, QString &errorMsg)
+{
+    Transaction t = TransactionsDAO::getById(transactionId);
+    if (t.id == 0) { errorMsg = QStringLiteral("交易不存在"); return false; }
+    if (t.status != "paid") {
+        errorMsg = QStringLiteral("当前交易状态不可退款");
+        return false;
+    }
+    return doRefund(transactionId, "refunded",
+                    QStringLiteral("管理员(id=%1)强制退款（举报/争议处理）").arg(adminId),
+                    true, errorMsg);
+}
 
 // ==================== 内部：退款事务（托管模式）====================
 

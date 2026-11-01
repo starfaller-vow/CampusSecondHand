@@ -113,7 +113,23 @@ QJsonObject txJsonForUser(const Transaction &t, int viewerId)
 }
 
 // 交易 JSON（管理员视角）：附带买卖双方与商品信息
-
+QJsonObject txJsonForAdmin(const Transaction &t)
+{
+    QJsonObject o = jsoncv::transactionToJson(t);
+    const Goods g = GoodsDAO::getById(t.goodsId);
+    o.insert("goodsTitle", g.title);
+    o.insert("goodsPrice", g.currentPrice);
+    o.insert("goodsExists", g.id != 0);
+    o.insert("goodsStatus", g.status);
+    o.insert("goodsOffReason", g.offReason);
+    const User buyer = UserDAO::getById(t.buyerId);
+    const User seller = UserDAO::getById(t.sellerId);
+    o.insert("buyerName", buyer.username);
+    o.insert("buyerStudentNo", buyer.studentNo);
+    o.insert("sellerName", seller.username);
+    o.insert("sellerStudentNo", seller.studentNo);
+    return o;
+}
 
 // 举报 JSON：附带被举报商品信息（举报中心列表直接显示，无需逐行请求商品详情）
 QJsonObject reportJsonWithContext(const Report &r)
@@ -644,11 +660,27 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     }
 
     // ---- 交易管理 ----
+    if (cmd == cs::cmd::AdminPaidTx) {
+        QJsonArray arr;
+        for (const Transaction &t : TransactionsDAO::getByStatus("paid")) {
+            arr.append(txJsonForAdmin(t));
+        }
+        return QJsonObject{ {"transactions", arr} };
+    }
 
+    if (cmd == cs::cmd::AdminRefundedTx) {
+        QJsonArray arr;
+        for (const Transaction &t : TransactionsDAO::getByStatus("refunded")) {
+            arr.append(txJsonForAdmin(t));
+        }
+        return QJsonObject{ {"transactions", arr} };
+    }
 
-
-
-
+    if (cmd == cs::cmd::AdminRefund) {
+        if (!TransactionsManager::instance().refundByAdmin(
+                p.value("txId").toInt(), uid, err)) return {};
+        return QJsonObject{};
+    }
 
     // ---- 余额统计 ----
 

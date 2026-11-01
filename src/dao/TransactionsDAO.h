@@ -11,6 +11,7 @@ public:
     static QList<Transaction> getByBuyer(int buyerId);
     static QList<Transaction> getBySeller(int sellerId);
     static QList<Transaction> getPaidByGoods(int goodsId);     // 按商品查"已付款"交易（举报强制退款用）
+    static QList<Transaction> getByStatus(const QString &status); // 按状态查交易（管理端交易管理用）
     // 查"已付款且超过 N 天"的交易（超时自动结算用）
     static QList<Transaction> getPaidExpired(int days);
     static bool insert(Transaction &t, QString &errorMsg); // 非const引用：成功后回填自增id到 t.id

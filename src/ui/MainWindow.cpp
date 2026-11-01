@@ -1304,6 +1304,17 @@ void MainWindow::setupUI()
                     reports.append(jsoncv::reportFromJson(v.toObject()));
                 }
 
+                // 一次拉取全部已付款交易，按商品分组，供"强制退款"按钮判断
+                QHash<int, QList<Transaction>> paidByGoods;
+                QJsonObject pd;
+                QString pe;
+                if (ClientConnector::instance().request(cs::cmd::AdminPaidTx, {}, pd, pe)) {
+                    for (const auto &v : pd.value("transactions").toArray()) {
+                        const Transaction t = jsoncv::transactionFromJson(v.toObject());
+                        paidByGoods[t.goodsId].append(t);
+                    }
+                }
+
                 for (const Report &r : reports) {
                     int row = table->rowCount();
                     table->insertRow(row);
@@ -1392,7 +1403,41 @@ void MainWindow::setupUI()
 
                     // 已解决/已退款的商品举报：可按商品状态执行 强制退款 / 强制下架 / 恢复上架
                     if ((r.status == "resolved" || r.status == "refunded") && r.targetType == "goods") {
+                        const QList<Transaction> paidTxs = paidByGoods.value(r.targetId);
 
+                        // 存在已付款交易 → 强制退款（退款后商品自动举报下架）
+                        if (!paidTxs.isEmpty()) {
+                            auto *refundBtn = new QPushButton(QStringLiteral("💰 强制退款"));
+                            refundBtn->setStyleSheet("background:#C62828;color:white;padding:2px 8px;border-radius:3px;");
+                            connect(refundBtn, &QPushButton::clicked, this, [this, r, paidTxs, refreshReports]() {
+                                Transaction tx = paidTxs.first();//取**第一条已付款交易**执行退款
+                                auto ret = QMessageBox::warning(this, QStringLiteral("确认强制退款"),
+                                    QStringLiteral("确定对交易 #%1（商品「%2」，金额¥%3）执行强制退款？\n平台托管货款将全额退回买家，商品将被标记为举报下架。")
+                                        .arg(tx.id).arg(tx.goodsTitle).arg(tx.goodsPrice, 0, 'f', 2),
+                                    QMessageBox::Yes | QMessageBox::No);
+                                if (ret != QMessageBox::Yes) return;
+                                QJsonObject rdata;
+                                QString err;
+                                if (!ClientConnector::instance().request(cs::cmd::AdminRefund,
+                                        QJsonObject{ {"txId", tx.id} }, rdata, err)) {
+                                    QMessageBox::warning(this, QStringLiteral("失败"), err);
+                                    return;
+                                }
+                                // 退款成功 → 举报标 refunded，激活"已退款"状态
+                                QJsonObject r2;
+                                QString e2;
+                                if (!ClientConnector::instance().request(cs::cmd::ReportHandle, QJsonObject{
+                                        {"reportId", r.id}, {"newStatus", "refunded"},
+                                        {"note", QStringLiteral("管理员强制退款，交易 #%1").arg(tx.id)}
+                                    }, r2, e2)) {
+                                    QMessageBox::warning(this, QStringLiteral("失败"), e2);
+                                }
+                                QMessageBox::information(this, QStringLiteral("成功"),
+                                    QStringLiteral("强制退款完成：买家已退款，商品已标记举报下架"));
+                                (*refreshReports)();
+                            });
+                            bl->addWidget(refundBtn);
+                        }
 
                         // 商品仍存在 → 在售可强制下架；举报下架中可恢复上架（状态由列表接口附带）
                         if (r.targetExists) {
@@ -1461,6 +1506,123 @@ void MainWindow::setupUI()
 
             registerLazy(page, *refreshReports);
             adminTabs->addTab(page, QStringLiteral("🚩 举报中心"));
+        }
+
+        // ===== 子Tab 6: 交易管理（已付款→强制退款 / 已退款→恢复上架）=====
+        {
+            auto *page = new QWidget();
+            auto *l = new QVBoxLayout(page);
+            auto *bar = new QHBoxLayout();
+            auto *statusFilter = new QComboBox();//`statusFilter`下拉选择框
+            statusFilter->addItem(QStringLiteral("💳 已付款"), "paid");
+            statusFilter->addItem(QStringLiteral("↩️ 已退款"), "refunded");
+            auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新"));
+            bar->addWidget(new QLabel(QStringLiteral("状态：")));
+            bar->addWidget(statusFilter);
+            bar->addWidget(refreshBtn);
+            bar->addStretch();
+            l->addLayout(bar);
+
+            auto *table = new QTableWidget(page);
+            table->setColumnCount(6);
+            table->setHorizontalHeaderLabels(QStringList{
+                QStringLiteral("ID"), QStringLiteral("买家"), QStringLiteral("卖家"),
+                QStringLiteral("商品"), QStringLiteral("金额"), QStringLiteral("操作")
+            });
+            table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+            table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+            table->setSelectionBehavior(QAbstractItemView::SelectRows);
+            l->addWidget(table);
+            //清空表格，根据下拉框选中的状态，查询对应交易记录，循环逐行填充交易表格，并且准备操作列的按钮容器
+            auto refreshTx = std::make_shared<std::function<void()>>();
+            *refreshTx = [this, table, statusFilter, refreshTx]() {
+                table->setRowCount(0);
+                QString filterStatus = statusFilter->currentData().toString();
+
+                // C/S：按状态拉取交易（已付款 / 已退款）
+                QJsonObject data;
+                QString err;
+                if (!ClientConnector::instance().request(
+                        filterStatus == "paid" ? cs::cmd::AdminPaidTx : cs::cmd::AdminRefundedTx,
+                        {}, data, err)) {
+                    QMessageBox::warning(this, QStringLiteral("失败"), err);
+                    return;
+                }
+                QList<Transaction> txs;
+                for (const auto &v : data.value("transactions").toArray()) {
+                    txs.append(jsoncv::transactionFromJson(v.toObject()));
+                }
+
+                for (const Transaction &t : txs) {
+                    // 买家/卖家/商品信息已由列表接口一次性附带，无需逐行请求
+                    int row = table->rowCount();
+                    table->insertRow(row);
+                    table->setItem(row, 0, new QTableWidgetItem(QString::number(t.id)));//交易 ID
+                    table->setItem(row, 1, new QTableWidgetItem(
+                        t.buyerName.isEmpty() ? QStringLiteral("（未知）") : t.buyerName));//买家用户名
+                    table->setItem(row, 2, new QTableWidgetItem(
+                        t.sellerName.isEmpty() ? QStringLiteral("（未知）") : t.sellerName));//卖家用户名
+                    table->setItem(row, 3, new QTableWidgetItem(
+                        t.goodsExists ? t.goodsTitle : QStringLiteral("（商品已删除）")));//商品标题
+                    table->setItem(row, 4, new QTableWidgetItem(
+                        t.goodsExists
+                            ? QStringLiteral("¥%1").arg(t.goodsPrice, 0, 'f', 2)
+                            : QStringLiteral("—")));//金额，格式化输出人民币，保留 2 位小数
+
+                    auto *btnWidget = new QWidget();
+                    auto *btnL = new QHBoxLayout(btnWidget);
+                    btnL->setContentsMargins(2, 2, 2, 2);
+
+                    if (filterStatus == "paid") {
+                        auto *refundBtn = new QPushButton(QStringLiteral("💰 强制退款"));
+                        refundBtn->setStyleSheet("background:#C62828;color:white;padding:2px 8px;border-radius:3px;");
+                        connect(refundBtn, &QPushButton::clicked, this, [this, t, refreshTx]() {
+                            auto ret = QMessageBox::warning(this, QStringLiteral("确认强制退款"),
+                                QStringLiteral("确定对交易 #%1（商品「%2」，金额¥%3）执行强制退款？\n平台托管货款将全额退回买家，商品将被标记为举报下架。")
+                                    .arg(t.id).arg(t.goodsTitle).arg(t.goodsPrice, 0, 'f', 2),
+                                QMessageBox::Yes | QMessageBox::No);
+                            if (ret != QMessageBox::Yes) return;
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::AdminRefund,
+                                    QJsonObject{ {"txId", t.id} }, rdata, err)) {
+                                QMessageBox::information(this, QStringLiteral("成功"),
+                                    QStringLiteral("强制退款完成：买家已退款，商品已标记举报下架"));
+                                (*refreshTx)();
+                            } else {
+                                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                            }
+                        });
+                        btnL->addWidget(refundBtn);
+                    } else if (t.goodsStatus == "off_shelf" && t.goodsOffReason == "report") {
+                        // 已退款且商品处于举报下架 → 管理员可恢复上架
+                        auto *restoreBtn = new QPushButton(QStringLiteral("恢复上架"));
+                        restoreBtn->setStyleSheet("background:#2196F3;color:white;padding:2px 8px;border-radius:3px;");
+                        connect(restoreBtn, &QPushButton::clicked, this, [this, t, refreshTx]() {
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::RestoreReport,
+                                    QJsonObject{ {"goodsId", t.goodsId} }, rdata, err)) {
+                                QMessageBox::information(this, QStringLiteral("成功"),
+                                    QStringLiteral("商品已恢复上架并解除举报下架标记"));
+                                (*refreshTx)();
+                            } else {
+                                QMessageBox::warning(this, QStringLiteral("失败"), err);
+                            }
+                        });
+                        btnL->addWidget(restoreBtn);
+                    } else {
+                        btnL->addWidget(new QLabel(QStringLiteral("商品已在售")));
+                    }
+                    btnL->addStretch();
+                    table->setCellWidget(row, 5, btnWidget);
+                }
+            };
+            connect(refreshBtn, &QPushButton::clicked, [refreshTx]() { (*refreshTx)(); });
+            connect(statusFilter, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                    [refreshTx](int) { (*refreshTx)(); });
+            registerLazy(page, *refreshTx);
+            adminTabs->addTab(page, QStringLiteral("💱 交易管理"));
         }
 
         // 管理员面板懒加载：首次显示触发默认子页；切换子页时各自首次刷新

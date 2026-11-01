@@ -41,6 +41,7 @@ public:
      * 仅支持 paid 状态；退款后商品置"举报下架"（卖家不可自行上架）
      * 托管模式：货款从平台托管直接退回买家，不依赖卖家余额
      */
+    bool refundByAdmin(int transactionId, int adminId, QString &errorMsg);
 
     // ===== 超时自动结算（托管模式）=====
     /**
