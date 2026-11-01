@@ -431,7 +431,11 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
         return QJsonObject{}; // M5：服务端在此向买家/卖家推送消息与商品状态
     }
 
-
+    if (cmd == cs::cmd::CancelTx) {
+        if (!TransactionsManager::instance().cancelTransaction(
+                p.value("txId").toInt(), uid, err)) return {};
+        return QJsonObject{};
+    }
 
     if (cmd == cs::cmd::ConfirmTx) {
         if (!TransactionsManager::instance().confirmReceived(

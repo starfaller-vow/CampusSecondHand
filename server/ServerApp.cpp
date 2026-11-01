@@ -10,16 +10,39 @@
 
 // 每批自动结算笔数：每批独立持写锁，批间回到事件循环让锁，
 // 避免积压大量超时交易时长时间独占写锁导致全站请求卡顿/超时
+static constexpr int kSettleBatchSize = 10;
 
 ServerApp::ServerApp(QObject *parent)
     : QTcpServer(parent)
 {
-
+    m_settleTimer = new QTimer(this);
+    m_settleTimer->setInterval(60 * 1000); // 每分钟扫一次超时交易
+    connect(m_settleTimer, &QTimer::timeout, this, &ServerApp::onAutoSettleTimer);
 }
 
+void ServerApp::startAutoSettle()
+{
+    // 启动时立即扫描一次（服务端重启后过期交易不丢失），随后每分钟一次
+    onAutoSettleTimer();
+    m_settleTimer->start();
+}
 
-
-
+void ServerApp::onAutoSettleTimer()
+{
+    int settled = 0;
+    {
+        // 与所有写请求共用同一把写锁；读请求持读锁仍可并发浏览
+        QWriteLocker locker(&serverDbLock());
+        settled = TransactionsManager::instance().autoSettleExpired(kSettleBatchSize);
+    }
+    if (settled > 0) {
+        qInfo() << "自动结算：本批结算" << settled << "笔超时交易";
+    }
+    // 本批做满说明可能还有积压：稍后在事件循环空闲时继续下一批（已让锁）
+    if (settled >= kSettleBatchSize) {
+        QTimer::singleShot(0, this, &ServerApp::onAutoSettleTimer);
+    }
+}
 
 void ServerApp::incomingConnection(qintptr socketDescriptor)
 {

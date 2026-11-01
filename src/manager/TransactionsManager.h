@@ -27,6 +27,8 @@ public:
     /**
      * @brief 取消交易并全额退款，买卖双方均可操作
      */
+    bool cancelTransaction(int transactionId, int operatorId,
+                           QString &errorMsg);
 
     // ===== 确认收货（仅买家）=====
     bool confirmReceived(int transactionId, int buyerId,
@@ -46,6 +48,7 @@ public:
      * @param maxCount 本批最多结算笔数（>0 时限流分批，避免长时间独占写锁；0=不限制）
      * @return 本次结算笔数（由服务端定时任务在持锁状态下调用）
      */
+    int autoSettleExpired(int maxCount = 0);
 
     // ===== 查询 =====
     QList<Transaction> myBuys(int userId);
@@ -60,6 +63,8 @@ private:
      * @param reportOffShelf true=退款后商品置"举报下架"（管理员强制退款），false=回到在售（协商取消）
      * 托管模式：买家货款从托管直接退回；若该交易无托管记录（旧版数据）会失败
      */
+    bool doRefund(int transactionId, const QString &newStatus, const QString &reason,
+                  bool reportOffShelf, QString &errorMsg);
 
     /**
      * @brief 内部：托管结算事务（被 confirmReceived/autoSettleExpired 共用）

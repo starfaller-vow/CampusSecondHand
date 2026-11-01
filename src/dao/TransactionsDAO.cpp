@@ -100,7 +100,32 @@ QList<Transaction> TransactionsDAO::getPaidByGoods(int goodsId)
     return list;
 }
 
-
+QList<Transaction> TransactionsDAO::getPaidExpired(int days)
+{
+    QList<Transaction> list;
+    QSqlQuery q(DatabaseManager::instance().db());
+    // 托管模式下：买家付款超 N 天未确认收货 → 自动结算给卖家
+    q.prepare("SELECT * FROM transactions WHERE status = 'paid' "
+              "AND create_time < datetime('now','localtime','-' || ? || ' days') ORDER BY id");
+    q.addBindValue(days);
+    if (q.exec()) {
+        while (q.next()) {
+            Transaction t;
+            t.id           = q.value("id").toInt();
+            t.buyerId      = q.value("buyer_id").toInt();
+            t.sellerId     = q.value("seller_id").toInt();
+            t.goodsId      = q.value("goods_id").toInt();
+            t.status       = q.value("status").toString();
+            t.remark       = q.value("remark").toString();
+            t.feeAmount    = q.value("fee_amount").toDouble();
+            t.feeRefunded  = q.value("fee_refunded").toInt();
+            t.createTime   = q.value("create_time").toString();
+            t.finishTime   = q.value("finish_time").toString();
+            list.append(t);
+        }
+    }
+    return list;
+}
 
 
 
@@ -165,7 +190,18 @@ bool TransactionsDAO::updateStatusIf(int id, const QString &newStatus,
     return true;
 }
 
-
+bool TransactionsDAO::updateFeeRefunded(int id, int refunded, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE transactions SET fee_refunded = ? WHERE id = ?");
+    q.addBindValue(refunded);
+    q.addBindValue(id);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    return true;
+}
 
 bool TransactionsDAO::updateFinishTime(int id, const QString &time, QString &errorMsg)
 {

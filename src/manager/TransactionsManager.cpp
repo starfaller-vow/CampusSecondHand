@@ -154,7 +154,25 @@ bool TransactionsManager::purchaseGoods(int buyerId, int goodsId, const QString 
 
 // ==================== 取消交易（全额退款）====================
 
+bool TransactionsManager::cancelTransaction(int transactionId, int operatorId,//订单编号，当前登录用户以及错误信息
+                                             QString &errorMsg)
+{
+    Transaction t = TransactionsDAO::getById(transactionId);
+    if (t.id == 0) { errorMsg = QStringLiteral("交易不存在"); return false; }
+    if (t.status != "paid") {
+        errorMsg = QStringLiteral("当前交易状态不可取消（仅已付款状态可取消）");
+        return false;
+    }
+    // 操作人必须是买家或卖家
+    if (operatorId != t.buyerId && operatorId != t.sellerId) {
+        errorMsg = QStringLiteral("无权操作此交易");
+        return false;
+    }
 
+    QString opName = (operatorId == t.buyerId) ? "买家" : "卖家";//判断是谁发起的取消订单，记录操作人的身份。
+    return doRefund(transactionId, "cancelled",
+                    QStringLiteral("%1主动取消交易").arg(opName), false, errorMsg);
+}
 
 // ==================== 管理员强制退款 ====================
 
@@ -162,7 +180,80 @@ bool TransactionsManager::purchaseGoods(int buyerId, int goodsId, const QString 
 
 // ==================== 内部：退款事务（托管模式）====================
 
+bool TransactionsManager::doRefund(int transactionId, const QString &newStatus,
+                                  const QString &reason, bool reportOffShelf,
+                                  QString &errorMsg)
+{
+    Transaction t = TransactionsDAO::getById(transactionId);
+    Goods g       = GoodsDAO::getById(t.goodsId);
 
+    QSqlDatabase db = DatabaseManager::instance().db();
+    if (!db.transaction()) {
+        errorMsg = QStringLiteral("无法开启事务");
+        return false;
+    }
+
+    auto rollback = [&](const QString &msg) { db.rollback(); errorMsg = msg; };
+    QString e;
+
+    // 0. 乐观锁抢占：仅当交易仍为 paid 时推进（防止与“确认收货/自动结算”等并发操作竞态）
+    if (!TransactionsDAO::updateStatusIf(t.id, newStatus, "paid", e)) {
+        rollback(e);
+        return false;
+    }
+
+    // 1. 托管资金直接退回买家（不依赖卖家余额；无托管记录的旧版数据在此被保险拦截）
+    double amount = 0, fee = 0;
+    if (!EscrowDAO::transitionIfHeld(t.id, "refunded", amount, fee, e)) {
+        rollback(e);
+        return false;
+    }
+    Q_UNUSED(fee); // 托管模式：手续费从未实扣，无需退回
+
+    // 2. 买家加回全部货款
+    double buyerAfter;
+    if (!UserDAO::changeBalance(t.buyerId, amount, buyerAfter, e, false)) {
+        rollback(QStringLiteral("买家退款失败：") + e);
+        return false;
+    }
+
+    // 3. 商品状态：协商取消→回到在售；管理员强制退款→举报下架（防卖家重新上架）
+    if (reportOffShelf) {
+        if (!GoodsDAO::forceOffShelfReport(t.goodsId, e)) {
+            rollback(QStringLiteral("商品举报下架失败：") + e);
+            return false;
+        }
+    } else {
+        GoodsDAO::setStatus(t.goodsId, "on_sale", e);
+    }
+
+    // 4. 写退款流水（托管模式：钱未经过卖家，仅买家有退款流水）
+    BalanceLog l;
+    l.userId       = t.buyerId;
+    l.type         = "refund";
+    l.amount       = amount;
+    l.balanceAfter = buyerAfter;
+    l.refId        = QString::number(t.id);
+    l.remark       = QStringLiteral("退款（托管退回）：%1").arg(reason);
+    BalanceLogsDAO::insert(l, e);
+
+    if (!db.commit()) {
+        errorMsg = db.lastError().text();
+        return false;
+    }
+
+    // 5. 发消息（事务提交后）
+    const QString title = (newStatus == "cancelled")
+        ? QStringLiteral("❌ 交易已取消（全额退款）")
+        : QStringLiteral("⚠️ 管理员强制退款");
+    const QString content = QStringLiteral("交易「%1」因%2已全额退款。平台托管货款¥%3已原路退回买家账户。")
+                                .arg(g.title, reason)
+                                .arg(amount, 0, 'f', 2);
+    MessagesDAO::insert(t.buyerId, title, content, "trade");
+    MessagesDAO::insert(t.sellerId, title, content, "trade");
+
+    return true;
+}
 
 // ==================== 内部：托管结算事务 ====================
 // paid→done + 托管 released + 卖家入账(价-费) + 商品 sold + 双方消息
@@ -267,7 +358,24 @@ bool TransactionsManager::settleToDone(int transactionId, const QString &reason,
 
 // ==================== 超时自动结算 ====================
 
-
+int TransactionsManager::autoSettleExpired(int maxCount)
+{
+    const int days = SettingsDAO::transactionTimeoutDays();
+    int settled = 0;
+    const QList<Transaction> expired = TransactionsDAO::getPaidExpired(days);
+    for (const Transaction &t : expired) {
+        if (maxCount > 0 && settled >= maxCount) break; // 本批限额：让锁后由定时器调度下一批
+        QString e;
+        const QString reason = QStringLiteral("买家超过%1天未确认收货，系统自动结算").arg(days);
+        if (settleToDone(t.id, reason, e)) {
+            settled++;
+            qInfo() << "超时自动结算：交易" << t.id << "已打款给卖家" << t.sellerId;
+        } else {
+            qWarning() << "超时自动结算失败：交易" << t.id << "原因:" << e;
+        }
+    }
+    return settled;
+}
 
 // ==================== 确认收货 ====================
 

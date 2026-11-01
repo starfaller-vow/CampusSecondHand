@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
     qInfo() << "CampusServer 已启动，端口 9527";
 
     // 3. 启动超时自动结算任务（启动即扫一次，之后每分钟扫一次）
-
+    server.startAutoSettle();
 
     return app.exec();
 }

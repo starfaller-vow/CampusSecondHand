@@ -17,12 +17,14 @@ public:
     explicit ServerApp(QObject *parent = nullptr);
 
     // 在 listen 成功后调用：立即扫描一次过期交易，之后每分钟定时扫描
+    void startAutoSettle();
 
 protected:
     // QTcpServer 回调：客户端接入
     void incomingConnection(qintptr socketDescriptor) override;
 
 private slots:
+    void onAutoSettleTimer();
 
 private:
     QSet<QThread *> m_threads; // 生命周期管理：连接结束即回收线程

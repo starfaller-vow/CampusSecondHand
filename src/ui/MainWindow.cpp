@@ -370,7 +370,22 @@ void MainWindow::setupUI()
                             });
                             btnL->addWidget(confirmBtn);
                         }
-
+                        // 买家或卖家可以取消
+                        auto *cancelBtn = new QPushButton(QStringLiteral("取消交易"));
+                        cancelBtn->setStyleSheet("background:#FF9800;color:white;padding:2px 8px;border-radius:3px;");
+                        connect(cancelBtn, &QPushButton::clicked, this, [this, t, refreshTable]() {
+                            auto ret = QMessageBox::warning(this, QStringLiteral("确认取消"),
+                                QStringLiteral("取消交易将全额退款，确定？"),
+                                QMessageBox::Yes | QMessageBox::No);
+                            if (ret != QMessageBox::Yes) return;
+                            QJsonObject rdata;
+                            QString err;
+                            if (ClientConnector::instance().request(cs::cmd::CancelTx,
+                                    QJsonObject{ {"txId", t.id} }, rdata, err)) {
+                                (*refreshTable)();
+                            } else { QMessageBox::warning(this, QStringLiteral("失败"), err); }
+                        });
+                        btnL->addWidget(cancelBtn);
                     }
 
                     table->setCellWidget(row, 6, btnWidget);
