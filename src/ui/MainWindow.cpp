@@ -357,7 +357,19 @@ void MainWindow::setupUI()
 
                     if (t.status == "paid") {
                         // 买家可以确认收货
-
+                        if (isBuyer) {
+                            auto *confirmBtn = new QPushButton(QStringLiteral("确认收货"));
+                            confirmBtn->setStyleSheet("background:#2196F3;color:white;padding:2px 8px;border-radius:3px;");
+                            connect(confirmBtn, &QPushButton::clicked, this, [this, t, refreshTable]() {
+                                QJsonObject rdata;
+                                QString err;
+                                if (ClientConnector::instance().request(cs::cmd::ConfirmTx,
+                                        QJsonObject{ {"txId", t.id} }, rdata, err)) {
+                                    (*refreshTable)();
+                                } else { QMessageBox::warning(this, QStringLiteral("失败"), err); }
+                            });
+                            btnL->addWidget(confirmBtn);
+                        }
 
                     }
 

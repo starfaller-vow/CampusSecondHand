@@ -145,8 +145,37 @@ bool TransactionsDAO::updateStatus(int id, const QString &status, QString &error
     return true;
 }
 
+bool TransactionsDAO::updateStatusIf(int id, const QString &newStatus,
+                                     const QString &expectedStatus, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE transactions SET status = ? WHERE id = ? AND status = ?");
+    q.addBindValue(newStatus);
+    q.addBindValue(id);
+    q.addBindValue(expectedStatus);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    // 乐观锁：状态已被并发修改（如买家已确认收货）时，匹配0行 → 失败
+    if (q.numRowsAffected() != 1) {
+        errorMsg = QStringLiteral("交易状态已变化，无法执行该操作");
+        return false;
+    }
+    return true;
+}
 
 
 
-
-
+bool TransactionsDAO::updateFinishTime(int id, const QString &time, QString &errorMsg)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("UPDATE transactions SET finish_time = ? WHERE id = ?");
+    q.addBindValue(time);
+    q.addBindValue(id);
+    if (!q.exec()) {
+        errorMsg = q.lastError().text();
+        return false;
+    }
+    return true;
+}

@@ -39,6 +39,7 @@ public:
     // ===== 状态操作 =====
     bool offShelf(int goodsId, int operatorId, QString &errorMsg);
     bool onShelf(int goodsId, int operatorId, QString &errorMsg);
+    bool markSold(int goodsId, QString &errorMsg);
 
     // ===== 删除 =====
     bool deleteGoods(int goodsId, int operatorId, QString &errorMsg);

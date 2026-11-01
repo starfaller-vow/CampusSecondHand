@@ -21,6 +21,9 @@ public:
      * @param feeOut    成功时回填手续费
      * @return 失败原因含"旧版数据"提示（老库 paid 交易无托管记录）
      */
+    static bool transitionIfHeld(int txId, const QString &toStatus,
+                                 double &amountOut, double &feeOut,
+                                 QString &errorMsg);
 
     // 托管中资金总额（管理员统计用）
 };

@@ -29,6 +29,8 @@ public:
      */
 
     // ===== 确认收货（仅买家）=====
+    bool confirmReceived(int transactionId, int buyerId,
+                         QString &errorMsg);
 
     // ===== 管理员强制退款 =====
     /**
@@ -63,6 +65,7 @@ private:
      * @brief 内部：托管结算事务（被 confirmReceived/autoSettleExpired 共用）
      * 乐观锁 paid→done + 托管 held→released + 卖家入账(价-费) + 商品 sold + 双方消息
      */
+    bool settleToDone(int transactionId, const QString &reason, QString &errorMsg);
 };
 
 #endif // TRANSACTIONSMANAGER_H

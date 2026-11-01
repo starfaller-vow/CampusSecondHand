@@ -217,7 +217,10 @@ bool GoodsManager::onShelf(int goodsId, int operatorId, QString &errorMsg)
     return GoodsDAO::setStatus(goodsId, "on_sale", errorMsg);
 }
 
-
+bool GoodsManager::markSold(int goodsId, QString &errorMsg)
+{
+    return GoodsDAO::setStatus(goodsId, "sold", errorMsg);
+}
 
 // ==================== 删除 ====================
 

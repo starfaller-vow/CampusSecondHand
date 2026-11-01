@@ -167,7 +167,103 @@ bool TransactionsManager::purchaseGoods(int buyerId, int goodsId, const QString 
 // ==================== 内部：托管结算事务 ====================
 // paid→done + 托管 released + 卖家入账(价-费) + 商品 sold + 双方消息
 
+bool TransactionsManager::settleToDone(int transactionId, const QString &reason,
+                                       QString &errorMsg)
+{
+    Transaction t = TransactionsDAO::getById(transactionId);
+    if (t.id == 0) { errorMsg = QStringLiteral("交易不存在"); return false; }
+    Goods g = GoodsDAO::getById(t.goodsId);
 
+    QSqlDatabase db = DatabaseManager::instance().db();
+    if (!db.transaction()) {
+        errorMsg = QStringLiteral("无法开启事务");
+        return false;
+    }
+
+    auto rollback = [&](const QString &msg) { db.rollback(); errorMsg = msg; };
+    QString e;
+
+    // 1. 乐观锁：paid → done（与退款操作互斥）
+    if (!TransactionsDAO::updateStatusIf(t.id, "done", "paid", e)) {
+        rollback(e);
+        return false;
+    }
+
+    // 2. 托管资金 released（无托管记录的旧版数据在此被保险拦截，杜绝双付）
+    double amount = 0, fee = 0;
+    if (!EscrowDAO::transitionIfHeld(t.id, "released", amount, fee, e)) {
+        rollback(e);
+        return false;
+    }
+
+    // 3. 卖家入账：货款（手续费在入账时从卖家所得中扣）
+    double sellerAfter;
+    if (!UserDAO::changeBalance(t.sellerId, amount, sellerAfter, e, false)) {
+        rollback(QStringLiteral("卖家收款失败：") + e);
+        return false;
+    }
+
+    double sellerFinal = sellerAfter;
+    if (fee > 0) {
+        if (!UserDAO::changeBalance(t.sellerId, -fee, sellerFinal, e, false)) {
+            rollback(QStringLiteral("手续费扣除失败：") + e);
+            return false;
+        }
+    }
+
+    // 4. 商品 sold + 完成时间
+    if (!GoodsDAO::setStatus(t.goodsId, "sold", e)) {
+        rollback(e);
+        return false;
+    }
+    if (!TransactionsDAO::updateFinishTime(t.id,
+            QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss"), e)) {
+        rollback(e);
+        return false;
+    }
+
+    // 5. 写结算流水
+    BalanceLog log1;
+    log1.userId       = t.sellerId;
+    log1.type         = "sale";  // 卖家售出货款入账（区别于买家的 consume）
+    log1.amount       = amount;
+    log1.balanceAfter = sellerAfter;
+    log1.refId        = QString::number(t.id);
+    log1.remark       = QStringLiteral("货款结算到账（%1）：%2").arg(reason, g.title);
+    BalanceLogsDAO::insert(log1, e);
+
+    if (fee > 0) {
+        BalanceLog log2;
+        log2.userId       = t.sellerId;
+        log2.type         = "fee_deduct";
+        log2.amount       = -fee;
+        log2.balanceAfter = sellerFinal;
+        log2.refId        = QString::number(t.id);
+        log2.remark       = QStringLiteral("平台手续费");
+        BalanceLogsDAO::insert(log2, e);
+    }
+
+    if (!db.commit()) {
+        errorMsg = db.lastError().text();
+        return false;
+    }
+
+    // 6. 发消息（事务提交后）
+    MessagesDAO::insert(t.sellerId,
+        QStringLiteral("🎉 货款已结算到账"),
+        QStringLiteral("交易「%1」%2，托管货款¥%3（手续费¥%4）已结算到你的账户。")
+            .arg(g.title, reason)
+            .arg(amount, 0, 'f', 2)
+            .arg(fee, 0, 'f', 2),
+        "trade");
+
+    MessagesDAO::insert(t.buyerId,
+        QStringLiteral("✅ 交易完成"),
+        QStringLiteral("你购买的「%1」已完成结算（%2）。").arg(g.title, reason),
+        "trade");
+
+    return true;
+}
 
 // ==================== 超时自动结算 ====================
 
@@ -175,7 +271,20 @@ bool TransactionsManager::purchaseGoods(int buyerId, int goodsId, const QString 
 
 // ==================== 确认收货 ====================
 
+bool TransactionsManager::confirmReceived(int transactionId, int buyerId,
+                                          QString &errorMsg)
+{
+    Transaction t = TransactionsDAO::getById(transactionId);
+    if (t.id == 0) { errorMsg = QStringLiteral("交易不存在"); return false; }
+    if (t.buyerId != buyerId) { errorMsg = QStringLiteral("仅买家可确认收货"); return false; }
+    if (t.status != "paid") {
+        errorMsg = QStringLiteral("当前交易状态不可确认收货");
+        return false;
+    }
 
+    // 托管结算：paid→done + 托管 released + 卖家入账 + 商品 sold（事务内原子完成）
+    return settleToDone(transactionId, QStringLiteral("买家确认收货"), errorMsg);
+}
 
 // ==================== 查询 ====================
 

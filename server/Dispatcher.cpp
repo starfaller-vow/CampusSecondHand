@@ -433,7 +433,11 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
 
 
 
-
+    if (cmd == cs::cmd::ConfirmTx) {
+        if (!TransactionsManager::instance().confirmReceived(
+                p.value("txId").toInt(), uid, err)) return {};
+        return QJsonObject{};
+    }
 
     if (cmd == cs::cmd::MyBuys) {
         QJsonArray arr;
