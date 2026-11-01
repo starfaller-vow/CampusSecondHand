@@ -683,7 +683,35 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     }
 
     // ---- 余额统计 ----
-
+    if (cmd == cs::cmd::AdminStats) {
+        QJsonArray users;
+        int activeCount = 0, bannedCount = 0;
+        double totalBalance = 0;
+        for (const User &u : UserManager::instance().listAllUsers()) {
+            users.append(jsoncv::userToJson(u));
+            totalBalance += u.balance;
+            if (u.isBanned()) bannedCount++;
+            else if (u.isActive()) activeCount++;
+        }
+        // 商品/交易总量
+        GoodsDAO::QueryOptions all;
+        all.status.clear(); // 不过滤状态 = 全部商品
+        const int goodsTotal = GoodsDAO::query(all).size();
+        int txTotal = 0;
+        for (const QString &s : {QStringLiteral("paid"), QStringLiteral("done"),
+                                 QStringLiteral("cancelled"), QStringLiteral("refunded")}) {
+            txTotal += TransactionsDAO::getByStatus(s).size();
+        }
+        return QJsonObject{
+            {"users", users},
+            {"activeCount", activeCount},
+            {"bannedCount", bannedCount},
+            {"totalBalance", totalBalance},
+            {"escrowTotal", EscrowDAO::heldTotal()}, // 担保交易：平台托管中资金
+            {"goodsTotal", goodsTotal},
+            {"txTotal", txTotal}
+        };
+    }
 
     err = QStringLiteral("未实现命令: %1").arg(cmd);
     return {};

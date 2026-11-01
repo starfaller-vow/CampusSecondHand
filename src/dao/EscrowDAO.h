@@ -26,6 +26,7 @@ public:
                                  QString &errorMsg);
 
     // 托管中资金总额（管理员统计用）
+    static double heldTotal();
 };
 
 #endif // ESCROWDAO_H

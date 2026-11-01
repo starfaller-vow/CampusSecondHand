@@ -59,3 +59,12 @@ bool EscrowDAO::transitionIfHeld(int txId, const QString &toStatus,
     return true;
 }
 
+double EscrowDAO::heldTotal()
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("SELECT COALESCE(SUM(amount), 0) FROM escrow WHERE status = 'held'");
+    if (q.exec() && q.next()) {
+        return q.value(0).toDouble();
+    }
+    return 0.0;
+}

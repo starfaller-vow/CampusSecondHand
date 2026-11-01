@@ -1625,6 +1625,70 @@ void MainWindow::setupUI()
             adminTabs->addTab(page, QStringLiteral("💱 交易管理"));
         }
 
+        // ===== 子Tab 7: 余额统计 =====
+        {
+            auto *page = new QWidget();
+            auto *l = new QVBoxLayout(page);
+            auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新统计"));//添加【刷新统计】按钮，点击就重新计算所有统计数据
+            l->addWidget(refreshBtn);
+
+            auto *statsLabel = new QLabel(page);
+            statsLabel->setStyleSheet(
+                "QLabel { background:#FAFAFA; padding:20px; border-radius:8px; font-size:14px; }"
+            );
+            l->addWidget(statsLabel);
+
+            auto refreshStats = [statsLabel]() {
+                // C/S：一次请求拿全平台统计
+                QJsonObject data;
+                QString err;
+                if (!ClientConnector::instance().request(cs::cmd::AdminStats, {}, data, err)) {
+                    QMessageBox::warning(nullptr, QStringLiteral("失败"), err);
+                    return;
+                }
+                const int userCount   = data.value("users").toArray().size();
+                const int activeCount = data.value("activeCount").toInt();
+                const int bannedCount = data.value("bannedCount").toInt();
+                const double totalBalance = data.value("totalBalance").toDouble();
+                const double escrowTotal  = data.value("escrowTotal").toDouble();
+                const int goodsTotal  = data.value("goodsTotal").toInt();
+                const int txTotal     = data.value("txTotal").toInt();
+
+                // 手续费规则单独取
+                double feeRate = 0, feeThr = 0;
+                QJsonObject sdata;
+                QString serr;
+                if (ClientConnector::instance().request(cs::cmd::SettingsGet, {}, sdata, serr)) {
+                    feeThr  = sdata.value("feeThreshold").toDouble();
+                    feeRate = sdata.value("feeRate").toDouble();
+                }
+
+                statsLabel->setText(QStringLiteral(
+                    "<h3 style='margin:0 0 12px 0;'>📊 平台统计概览</h3>"
+                    "<table style='width:100%;'>"
+                    "<tr><td><b>用户总数：</b></td><td>%1 人</td></tr>"
+                    "<tr><td><b>正常用户：</b></td><td>%2 人</td></tr>"
+                    "<tr><td><b>封禁用户：</b></td><td>%3 人</td></tr>"
+                    "<tr><td><b>流通总余额：</b></td><td style='color:#2E7D32;font-weight:bold;'>¥%4</td></tr>"
+                    "<tr><td><b>托管中资金：</b></td><td style='color:#F9A825;font-weight:bold;'>¥%9</td></tr>"
+                    "<tr><td><b>商品总数：</b></td><td>%5 件</td></tr>"
+                    "<tr><td><b>交易总数：</b></td><td>%6 笔</td></tr>"
+                    "<tr><td><b>当前手续费规则：</b></td><td>满 ¥%7 起征，超出部分按 %8% 收取</td></tr>"
+                    "</table>"
+                ).arg(userCount).arg(activeCount).arg(bannedCount)
+                 .arg(totalBalance, 0, 'f', 2)
+                 .arg(goodsTotal)
+                 .arg(txTotal)
+                 .arg(feeThr, 0, 'f', 0)
+                 .arg(feeRate * 100, 0, 'f', 1)
+                 .arg(escrowTotal, 0, 'f', 2));
+            };
+
+            connect(refreshBtn, &QPushButton::clicked, refreshStats);
+            registerLazy(page, refreshStats);
+            adminTabs->addTab(page, QStringLiteral("📊 余额统计"));
+        }
+
         // 管理员面板懒加载：首次显示触发默认子页；切换子页时各自首次刷新
         registerLazy(m_tabAdmin, [adminTabs, runLazy]() { runLazy(adminTabs->currentWidget()); });
         connect(adminTabs, &QTabWidget::currentChanged, this,
