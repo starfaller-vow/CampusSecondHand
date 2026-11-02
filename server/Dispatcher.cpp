@@ -439,6 +439,16 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     // ==================== 交易 ====================
 
     if (cmd == cs::cmd::Purchase) {
+        // 新客户端带上用户确认的价格；本命令已持全局写锁，校验到扣款期间不会被改价。
+        if (p.contains("expectedPrice")) {
+            const Goods goods = GoodsDAO::getById(p.value("goodsId").toInt());
+            if (goods.id == 0) { err = QStringLiteral("商品不存在"); return {}; }
+            if (!p.value("expectedPrice").isDouble() ||
+                p.value("expectedPrice").toDouble() != goods.currentPrice) {
+                err = QStringLiteral("商品价格已变动，请重新打开支付确认后再购买");
+                return {};
+            }
+        }
         if (!TransactionsManager::instance().purchaseGoods(
                 uid, p.value("goodsId").toInt(),
                 p.value("remark").toString().trimmed(), err)) {
@@ -693,15 +703,14 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
             if (u.isBanned()) bannedCount++;
             else if (u.isActive()) activeCount++;
         }
-        // 商品/交易总量
+        // 商品总量；交易按当前状态分别统计，成功交易仅包含 done。
         GoodsDAO::QueryOptions all;
         all.status.clear(); // 不过滤状态 = 全部商品
         const int goodsTotal = GoodsDAO::query(all).size();
-        int txTotal = 0;
-        for (const QString &s : {QStringLiteral("paid"), QStringLiteral("done"),
-                                 QStringLiteral("cancelled"), QStringLiteral("refunded")}) {
-            txTotal += TransactionsDAO::getByStatus(s).size();
-        }
+        const int txDoneCount = TransactionsDAO::getByStatus(QStringLiteral("done")).size();
+        const int txPaidCount = TransactionsDAO::getByStatus(QStringLiteral("paid")).size();
+        const int txCancelledCount = TransactionsDAO::getByStatus(QStringLiteral("cancelled")).size();
+        const int txRefundedCount = TransactionsDAO::getByStatus(QStringLiteral("refunded")).size();
         return QJsonObject{
             {"users", users},
             {"activeCount", activeCount},
@@ -709,7 +718,10 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
             {"totalBalance", totalBalance},
             {"escrowTotal", EscrowDAO::heldTotal()}, // 担保交易：平台托管中资金
             {"goodsTotal", goodsTotal},
-            {"txTotal", txTotal}
+            {"txDoneCount", txDoneCount},
+            {"txPaidCount", txPaidCount},
+            {"txCancelledCount", txCancelledCount},
+            {"txRefundedCount", txRefundedCount}
         };
     }
 

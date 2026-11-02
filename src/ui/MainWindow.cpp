@@ -1652,7 +1652,10 @@ void MainWindow::setupUI()
                 const double totalBalance = data.value("totalBalance").toDouble();
                 const double escrowTotal  = data.value("escrowTotal").toDouble();
                 const int goodsTotal  = data.value("goodsTotal").toInt();
-                const int txTotal     = data.value("txTotal").toInt();
+                const int txDoneCount = data.value("txDoneCount").toInt();
+                const int txPaidCount = data.value("txPaidCount").toInt();
+                const int txCancelledCount = data.value("txCancelledCount").toInt();
+                const int txRefundedCount = data.value("txRefundedCount").toInt();
 
                 // 手续费规则单独取
                 double feeRate = 0, feeThr = 0;
@@ -1670,18 +1673,24 @@ void MainWindow::setupUI()
                     "<tr><td><b>正常用户：</b></td><td>%2 人</td></tr>"
                     "<tr><td><b>封禁用户：</b></td><td>%3 人</td></tr>"
                     "<tr><td><b>流通总余额：</b></td><td style='color:#2E7D32;font-weight:bold;'>¥%4</td></tr>"
-                    "<tr><td><b>托管中资金：</b></td><td style='color:#F9A825;font-weight:bold;'>¥%9</td></tr>"
-                    "<tr><td><b>商品总数：</b></td><td>%5 件</td></tr>"
-                    "<tr><td><b>交易总数：</b></td><td>%6 笔</td></tr>"
-                    "<tr><td><b>当前手续费规则：</b></td><td>满 ¥%7 起征，超出部分按 %8% 收取</td></tr>"
+                    "<tr><td><b>托管中资金：</b></td><td style='color:#F9A825;font-weight:bold;'>¥%5</td></tr>"
+                    "<tr><td><b>商品总数：</b></td><td>%6 件</td></tr>"
+                    "<tr><td><b>成功交易数：</b></td><td>%7 笔</td></tr>"
+                    "<tr><td><b>交易中数量：</b></td><td>%8 笔</td></tr>"
+                    "<tr><td><b>已取消数量：</b></td><td>%9 笔</td></tr>"
+                    "<tr><td><b>已退款数量：</b></td><td>%10 笔</td></tr>"
+                    "<tr><td><b>当前手续费规则：</b></td><td>满 ¥%11 起征，超出部分按 %12% 收取</td></tr>"
                     "</table>"
                 ).arg(userCount).arg(activeCount).arg(bannedCount)
                  .arg(totalBalance, 0, 'f', 2)
+                 .arg(escrowTotal, 0, 'f', 2)
                  .arg(goodsTotal)
-                 .arg(txTotal)
+                 .arg(txDoneCount)
+                 .arg(txPaidCount)
+                 .arg(txCancelledCount)
+                 .arg(txRefundedCount)
                  .arg(feeThr, 0, 'f', 0)
-                 .arg(feeRate * 100, 0, 'f', 1)
-                 .arg(escrowTotal, 0, 'f', 2));
+                 .arg(feeRate * 100, 0, 'f', 1));
             };
 
             connect(refreshBtn, &QPushButton::clicked, refreshStats);
