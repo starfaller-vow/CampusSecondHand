@@ -601,7 +601,7 @@ void MainWindow::setupUI()
             m_msgDebounceTimer->setSingleShot(true);
             connect(m_msgDebounceTimer, &QTimer::timeout, this, [this, refreshMsg]() {
                 refreshMsg();
-                // 交易结算/退款等余额变动都伴随消息推送，顺带刷新余额流水，
+                // 交易结算/退款等余额变动都伴随消息推送，顺带刷新余额和流水，
                 // 使卖家到账收入无需手动点刷新即可显示
                 if (m_balanceRefreshHook) m_balanceRefreshHook();
             });
@@ -687,7 +687,7 @@ void MainWindow::setupUI()
                   fresh.college.isEmpty() ? QStringLiteral("—") : fresh.college,
                   fresh.contact.isEmpty() ? QStringLiteral("未设置") : fresh.contact,
                   fresh.createTime,
-                  QStringLiteral("¥%1").arg(fresh.balance, 0, 'f', 2)));
+                  QString::number(fresh.balance, 'f', 2)));
         };
         leftL->addWidget(infoBox);
 
@@ -778,9 +778,13 @@ void MainWindow::setupUI()
                 balTable->setItem(row, 3, new QTableWidgetItem(l.createTime));
             }
         };
-        // 手动刷新按钮 + 推送触发的自动刷新钩子（交易结算/退款到账后无需手动点刷新）
-        connect(balRefreshBtn, &QPushButton::clicked, refreshBalanceLog);
-        m_balanceRefreshHook = refreshBalanceLog;
+        // 统一刷新入口：左侧余额、内存中的用户信息与右侧流水一起更新。
+        auto refreshBalance = [refreshInfo, refreshBalanceLog]() {
+            refreshInfo();
+            refreshBalanceLog();
+        };
+        connect(balRefreshBtn, &QPushButton::clicked, this, refreshBalance);
+        m_balanceRefreshHook = refreshBalance;
         mainL->addWidget(leftPanel, 1);
         mainL->addWidget(rightPanel, 2);//权重 1 : 权重 2。水平方向空间分配比例：左侧占 1 份，右侧占 2 份，右边日志区域更宽
 
@@ -842,7 +846,7 @@ void MainWindow::setupUI()
         });
 
         // ===== 兑换充值码 =====
-        connect(redeemBtn, &QPushButton::clicked, this, [this, refreshInfo, refreshBalanceLog]() {
+        connect(redeemBtn, &QPushButton::clicked, this, [this, refreshBalance]() {
             bool ok;//`ok`用来判断用户是点了【确定】还是【取消】
             QString code = QInputDialog::getText(this, QStringLiteral("兑换充值码"),//弹出输入框
                 QStringLiteral("请输入充值码："), QLineEdit::Normal, "", &ok).trimmed();//去掉字符串前后多余空格，防止用户不小心输入空格导致兑换失败
@@ -854,8 +858,7 @@ void MainWindow::setupUI()
                 const double newBal = data.value("balance").toDouble();
                 QMessageBox::information(this, QStringLiteral("成功"),
                     QStringLiteral("兑换成功！新余额：¥%1").arg(newBal, 0, 'f', 2));
-                refreshInfo();
-                refreshBalanceLog();
+                refreshBalance();
             } else {
                 QMessageBox::warning(this, QStringLiteral("失败"), err);
             }
@@ -895,10 +898,7 @@ void MainWindow::setupUI()
                     QStringLiteral("反馈已发送给管理员，请耐心等待处理。"));
             });
         }
-        registerLazy(m_tabProfile, [refreshInfo, refreshBalanceLog]() {
-            refreshInfo();
-            refreshBalanceLog();
-        });
+        registerLazy(m_tabProfile, refreshBalance);
     }
     m_tabWidget->addTab(m_tabProfile, QStringLiteral("👤 个人中心"));
     qDebug() << "[setupUI] Tab6 个人中心 完成";
