@@ -18,7 +18,7 @@ QList<Category> CategoriesDAO::getAll()
     return list;
 }
 
-Category CategoriesDAO::getById(int id)
+Category CategoriesDAO::getById(int id)//根据分类编号 id，从数据库中查询一个商品分类，并将结果作为 Category 对象返回
 {
     Category c;
     QSqlQuery q(DatabaseManager::instance().db());

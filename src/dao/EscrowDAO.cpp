@@ -5,6 +5,7 @@
 #include <QSqlError>
 
 bool EscrowDAO::create(int txId, double amount, double fee, QString &errorMsg)
+//新增一条交易资金托管记录
 {
     QSqlQuery q(DatabaseManager::instance().db());
     q.prepare("INSERT INTO escrow (tx_id, amount, fee) VALUES (?, ?, ?)");
@@ -20,7 +21,7 @@ bool EscrowDAO::create(int txId, double amount, double fee, QString &errorMsg)
 
 bool EscrowDAO::transitionIfHeld(int txId, const QString &toStatus,
                                  double &amountOut, double &feeOut,
-                                 QString &errorMsg)
+                                 QString &errorMsg)//	要处理的交易编号
 {
     // 1. 先取托管记录（老库数据无记录 → 保险拦截，杜绝双付/凭空退款）
     QSqlQuery sel(DatabaseManager::instance().db());
@@ -42,7 +43,7 @@ bool EscrowDAO::transitionIfHeld(int txId, const QString &toStatus,
         return false;
     }
 
-    // 2. 乐观锁：仅 held 可流转
+    // 2. 乐观锁：仅 held 可流转，held表示钱仍在托管中
     QSqlQuery up(DatabaseManager::instance().db());
     up.prepare("UPDATE escrow SET status = ?, finish_time = datetime('now','localtime') "
                "WHERE tx_id = ? AND status = 'held'");

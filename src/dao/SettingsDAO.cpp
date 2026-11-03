@@ -40,7 +40,7 @@ int SettingsDAO::getInt(const QString &key, int def)
     return ok ? v : def;
 }
 
-double SettingsDAO::feeThreshold()     { return getDouble("fee_threshold", 100.0); }
-double SettingsDAO::feeRate()          { return getDouble("fee_rate", 0.005); }
+double SettingsDAO::feeThreshold()     { return getDouble("fee_threshold", 100.0); }//手续费起征额
+double SettingsDAO::feeRate()          { return getDouble("fee_rate", 0.005); }//手续费率
 double SettingsDAO::conditionCoef(const QString &c) { return getDouble("coef_" + c, 0.5); }
-int    SettingsDAO::transactionTimeoutDays() { return getInt("transaction_timeout_days", 7); }
+int    SettingsDAO::transactionTimeoutDays() { return getInt("transaction_timeout_days", 7); }//超时天数

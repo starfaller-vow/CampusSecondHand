@@ -31,7 +31,7 @@ bool RedeemCodesDAO::generateBatch(double amount, int count, QStringList &outCod
             else suffix.append(QChar('A' + r - 10));
         }
         QString code = QString("CAMPUS%1-%2").arg((int)amount).arg(suffix);
-
+        //固定前缀 CAMPUS + 金额的整数部分 + 连字符 - + 8 位随机字符。
         RedeemCode c;
         c.code = code; c.amount = amount;
         if (!insert(c, err)) return false;

@@ -3,6 +3,7 @@
 #include <QSqlQuery>
 
 bool FavoritesDAO::add(int userId, int goodsId)
+//把某件商品加入某个用户的收藏夹。如果已经收藏过，就忽略这次插入，不会产生重复记录
 {
     QSqlQuery q(DatabaseManager::instance().db());
     q.prepare("INSERT OR IGNORE INTO favorites (user_id, goods_id) VALUES (?, ?)");
@@ -27,6 +28,7 @@ bool FavoritesDAO::exists(int userId, int goodsId)
 }
 
 QList<Favorite> FavoritesDAO::getByUser(int userId)
+//	查询该用户的全部收藏记录
 {
     QList<Favorite> list;
     QSqlQuery q(DatabaseManager::instance().db());

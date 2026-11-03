@@ -3,7 +3,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 
-bool BalanceLogsDAO::insert(const BalanceLog &l, QString &errorMsg)
+bool BalanceLogsDAO::insert(const BalanceLog &l, QString &errorMsg)//把一条余额变动日志 `BalanceLog` 插入到数据库 `balance_logs` 表
 {
     QSqlQuery q(DatabaseManager::instance().db());
     q.prepare(
@@ -23,7 +23,7 @@ bool BalanceLogsDAO::insert(const BalanceLog &l, QString &errorMsg)
     return true;
 }
 
-QList<BalanceLog> BalanceLogsDAO::getByUser(int userId)
+QList<BalanceLog> BalanceLogsDAO::getByUser(int userId)//查出该用户所有余额变动记录
 {
     QList<BalanceLog> list;
     QSqlQuery q(DatabaseManager::instance().db());
