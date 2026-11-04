@@ -1,7 +1,6 @@
 #include "GoodsDetailDialog.h"
 #include "ClientConnector.h"
 #include "ImageLoader.h"
-#include "PaymentConfirmDialog.h"
 #include "../shared/Protocol.h"
 #include "../shared/JsonConv.h"
 #include "../shared/PasswordUtil.h"
@@ -424,51 +423,76 @@ void GoodsDetailDialog::onReportGoods()
 
 void GoodsDetailDialog::onBuyClicked()
 {
-    m_buyBtn->setEnabled(false);
-    auto &conn = ClientConnector::instance();
-    QJsonObject userData, goodsData;
-    QString err;
-    // 每次打开支付确认都重新读取余额、商品状态、价格和服务端计算的手续费。
-    if (!conn.request(cs::cmd::Self, {}, userData, err) ||
-        !conn.request(cs::cmd::GoodsDetail,
-            QJsonObject{{"goodsId", m_goods.id}}, goodsData, err)) {
-        QMessageBox::critical(this, QStringLiteral("无法确认支付"), err);
-        m_buyBtn->setEnabled(m_goods.isOnSale() && m_goods.sellerId != m_currentUserId);
-        return;
-    }
-    const User buyer = jsoncv::userFromJson(userData.value("user").toObject());
-    m_goods = jsoncv::goodsFromJson(goodsData.value("goods").toObject());
-    m_fee = goodsData.value("fee").toDouble();
-    loadData();
-    if (m_goods.id == 0 || !m_goods.isOnSale() || m_goods.sellerId == m_currentUserId) {
-        QMessageBox::warning(this, QStringLiteral("无法购买"),
-                             QStringLiteral("当前商品不可购买，请刷新商品列表。"));
-        return;
-    }
+    // 支付确认弹窗
+    QDialog *dlg = new QDialog(this);
+    dlg->setWindowTitle(QStringLiteral("💰 支付确认"));
+    dlg->resize(420, 280);
 
-    // 独立控件分别显示各项金额，避免多行文本重复占位符造成金额错位。
-    PaymentConfirmDialog dlg(m_goods.title, m_sellerUsername,
-                             m_goods.currentPrice, buyer.balance, m_fee, this);
-    if (dlg.exec() != QDialog::Accepted) {
-        m_buyBtn->setEnabled(true);
-        return;
+    // C/S：余额从服务端取，手续费用详情接口下发的值
+    User buyer;
+    {
+        QJsonObject d; QString e;
+        if (!ClientConnector::instance().request(cs::cmd::Self, {}, d, e)) {
+            QMessageBox::critical(this, QStringLiteral("失败"), e);
+            delete dlg;
+            return;
+        }
+        buyer = jsoncv::userFromJson(d.value("user").toObject());
     }
+    const double fee = m_fee;
 
-    // 弹窗确认后再向服务端提交；禁用购买按钮，避免等待响应时重复操作。
-    QJsonObject data;
-    const bool ok = conn.request(cs::cmd::Purchase,
-        QJsonObject{
-            {"goodsId", m_goods.id},
-            {"expectedPrice", m_goods.currentPrice},
-            {"remark", dlg.remark()}
-        }, data, err);
-    if (ok) {
-        QMessageBox::information(this, QStringLiteral("支付成功"),
-            QStringLiteral("¥%1 支付成功，货款已由平台托管。")
-                .arg(m_goods.currentPrice, 0, 'f', 2));
-        accept();
-    } else {
-        QMessageBox::critical(this, QStringLiteral("支付失败"), err);
-        m_buyBtn->setEnabled(true);
-    }
+    auto *layout = new QVBoxLayout(dlg);
+    auto *info = new QLabel(QStringLiteral(
+        "商品：%1\n"
+        "卖家：@%2\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        "应付金额：¥%1\n"
+        "你的余额：¥%3\n"
+        "支付后余额：¥%4\n\n"
+        "预计手续费（满100超出0.5%%）：\n"
+        "  ¥%5\n"
+        "━━━━━━━━━━━━━━━\n"
+        "🔒 货款由平台托管，确认收货后才结算给卖家"
+    ).arg(m_goods.title, m_sellerUsername)
+     .arg(m_goods.currentPrice, 0, 'f', 2)
+     .arg(buyer.balance, 0, 'f', 2)
+     .arg(buyer.balance - m_goods.currentPrice, 0, 'f', 2)
+     .arg(fee, 0, 'f', 2), dlg);
+    info->setWordWrap(true);
+    info->setStyleSheet("font-size: 13px; padding: 10px;");
+    layout->addWidget(info);
+
+    auto *remarkEdit = new QLineEdit(dlg);
+    remarkEdit->setPlaceholderText(QStringLiteral("给卖家的留言（可选）"));
+    layout->addWidget(remarkEdit);
+
+    auto *btnRow = new QHBoxLayout();
+    auto *cancelBtn = new QPushButton(QStringLiteral("取消"), dlg);
+    auto *confirmBtn = new QPushButton(QStringLiteral("✅ 确认支付"), dlg);
+    confirmBtn->setStyleSheet("background: #e53935; color: white; padding: 8px 20px; border-radius: 6px;");
+    connect(cancelBtn, &QPushButton::clicked, dlg, &QDialog::reject);
+
+    connect(confirmBtn, &QPushButton::clicked, this, [=]() {
+        // C/S：购买命令走服务端（服务端事务内锁定+扣款）
+        QJsonObject d; QString err;
+        bool ok = ClientConnector::instance().request(cs::cmd::Purchase,
+            QJsonObject{
+                {"goodsId", m_goods.id},
+                {"remark", remarkEdit->text().trimmed()}
+            }, d, err);
+        if (ok) {
+            QMessageBox::information(dlg, QStringLiteral("支付成功"),
+                                     QStringLiteral("¥%1 支付成功！").arg(m_goods.currentPrice, 0, 'f', 2));
+            dlg->accept();
+            accept();
+        } else {
+            QMessageBox::critical(dlg, QStringLiteral("支付失败"), err);
+        }
+    });
+
+    btnRow->addWidget(cancelBtn);
+    btnRow->addWidget(confirmBtn);
+    layout->addLayout(btnRow);
+
+    dlg->exec();
 }

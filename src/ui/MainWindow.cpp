@@ -601,7 +601,7 @@ void MainWindow::setupUI()
             m_msgDebounceTimer->setSingleShot(true);
             connect(m_msgDebounceTimer, &QTimer::timeout, this, [this, refreshMsg]() {
                 refreshMsg();
-                // 交易结算/退款等余额变动都伴随消息推送，顺带刷新余额和流水，
+                // 交易结算/退款等余额变动都伴随消息推送，顺带刷新余额流水，
                 // 使卖家到账收入无需手动点刷新即可显示
                 if (m_balanceRefreshHook) m_balanceRefreshHook();
             });
@@ -687,7 +687,7 @@ void MainWindow::setupUI()
                   fresh.college.isEmpty() ? QStringLiteral("—") : fresh.college,
                   fresh.contact.isEmpty() ? QStringLiteral("未设置") : fresh.contact,
                   fresh.createTime,
-                  QString::number(fresh.balance, 'f', 2)));
+                  QStringLiteral("¥%1").arg(fresh.balance, 0, 'f', 2)));
         };
         leftL->addWidget(infoBox);
 
@@ -778,13 +778,9 @@ void MainWindow::setupUI()
                 balTable->setItem(row, 3, new QTableWidgetItem(l.createTime));
             }
         };
-        // 统一刷新入口：左侧余额、内存中的用户信息与右侧流水一起更新。
-        auto refreshBalance = [refreshInfo, refreshBalanceLog]() {
-            refreshInfo();
-            refreshBalanceLog();
-        };
-        connect(balRefreshBtn, &QPushButton::clicked, this, refreshBalance);
-        m_balanceRefreshHook = refreshBalance;
+        // 手动刷新按钮 + 推送触发的自动刷新钩子（交易结算/退款到账后无需手动点刷新）
+        connect(balRefreshBtn, &QPushButton::clicked, refreshBalanceLog);
+        m_balanceRefreshHook = refreshBalanceLog;
         mainL->addWidget(leftPanel, 1);
         mainL->addWidget(rightPanel, 2);//权重 1 : 权重 2。水平方向空间分配比例：左侧占 1 份，右侧占 2 份，右边日志区域更宽
 
@@ -846,7 +842,7 @@ void MainWindow::setupUI()
         });
 
         // ===== 兑换充值码 =====
-        connect(redeemBtn, &QPushButton::clicked, this, [this, refreshBalance]() {
+        connect(redeemBtn, &QPushButton::clicked, this, [this, refreshInfo, refreshBalanceLog]() {
             bool ok;//`ok`用来判断用户是点了【确定】还是【取消】
             QString code = QInputDialog::getText(this, QStringLiteral("兑换充值码"),//弹出输入框
                 QStringLiteral("请输入充值码："), QLineEdit::Normal, "", &ok).trimmed();//去掉字符串前后多余空格，防止用户不小心输入空格导致兑换失败
@@ -858,7 +854,8 @@ void MainWindow::setupUI()
                 const double newBal = data.value("balance").toDouble();
                 QMessageBox::information(this, QStringLiteral("成功"),
                     QStringLiteral("兑换成功！新余额：¥%1").arg(newBal, 0, 'f', 2));
-                refreshBalance();
+                refreshInfo();
+                refreshBalanceLog();
             } else {
                 QMessageBox::warning(this, QStringLiteral("失败"), err);
             }
@@ -898,7 +895,10 @@ void MainWindow::setupUI()
                     QStringLiteral("反馈已发送给管理员，请耐心等待处理。"));
             });
         }
-        registerLazy(m_tabProfile, refreshBalance);
+        registerLazy(m_tabProfile, [refreshInfo, refreshBalanceLog]() {
+            refreshInfo();
+            refreshBalanceLog();
+        });
     }
     m_tabWidget->addTab(m_tabProfile, QStringLiteral("👤 个人中心"));
     qDebug() << "[setupUI] Tab6 个人中心 完成";
@@ -1652,10 +1652,7 @@ void MainWindow::setupUI()
                 const double totalBalance = data.value("totalBalance").toDouble();
                 const double escrowTotal  = data.value("escrowTotal").toDouble();
                 const int goodsTotal  = data.value("goodsTotal").toInt();
-                const int txDoneCount = data.value("txDoneCount").toInt();
-                const int txPaidCount = data.value("txPaidCount").toInt();
-                const int txCancelledCount = data.value("txCancelledCount").toInt();
-                const int txRefundedCount = data.value("txRefundedCount").toInt();
+                const int txTotal     = data.value("txTotal").toInt();
 
                 // 手续费规则单独取
                 double feeRate = 0, feeThr = 0;
@@ -1673,24 +1670,18 @@ void MainWindow::setupUI()
                     "<tr><td><b>正常用户：</b></td><td>%2 人</td></tr>"
                     "<tr><td><b>封禁用户：</b></td><td>%3 人</td></tr>"
                     "<tr><td><b>流通总余额：</b></td><td style='color:#2E7D32;font-weight:bold;'>¥%4</td></tr>"
-                    "<tr><td><b>托管中资金：</b></td><td style='color:#F9A825;font-weight:bold;'>¥%5</td></tr>"
-                    "<tr><td><b>商品总数：</b></td><td>%6 件</td></tr>"
-                    "<tr><td><b>成功交易数：</b></td><td>%7 笔</td></tr>"
-                    "<tr><td><b>交易中数量：</b></td><td>%8 笔</td></tr>"
-                    "<tr><td><b>已取消数量：</b></td><td>%9 笔</td></tr>"
-                    "<tr><td><b>已退款数量：</b></td><td>%10 笔</td></tr>"
-                    "<tr><td><b>当前手续费规则：</b></td><td>满 ¥%11 起征，超出部分按 %12% 收取</td></tr>"
+                    "<tr><td><b>托管中资金：</b></td><td style='color:#F9A825;font-weight:bold;'>¥%9</td></tr>"
+                    "<tr><td><b>商品总数：</b></td><td>%5 件</td></tr>"
+                    "<tr><td><b>交易总数：</b></td><td>%6 笔</td></tr>"
+                    "<tr><td><b>当前手续费规则：</b></td><td>满 ¥%7 起征，超出部分按 %8% 收取</td></tr>"
                     "</table>"
                 ).arg(userCount).arg(activeCount).arg(bannedCount)
                  .arg(totalBalance, 0, 'f', 2)
-                 .arg(escrowTotal, 0, 'f', 2)
                  .arg(goodsTotal)
-                 .arg(txDoneCount)
-                 .arg(txPaidCount)
-                 .arg(txCancelledCount)
-                 .arg(txRefundedCount)
+                 .arg(txTotal)
                  .arg(feeThr, 0, 'f', 0)
-                 .arg(feeRate * 100, 0, 'f', 1));
+                 .arg(feeRate * 100, 0, 'f', 1)
+                 .arg(escrowTotal, 0, 'f', 2));
             };
 
             connect(refreshBtn, &QPushButton::clicked, refreshStats);

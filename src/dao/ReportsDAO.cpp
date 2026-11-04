@@ -7,7 +7,7 @@
 bool ReportsDAO::insert(const Report &r, QString &err)
 {
     QSqlQuery q(DatabaseManager::instance().db());
-    q.prepare("INSERT INTO reports (reporter_id, target_type, target_id, reason_type, description) "//新增一条举报
+    q.prepare("INSERT INTO reports (reporter_id, target_type, target_id, reason_type, description) "
               "VALUES (?, ?, ?, ?, ?)");
     q.addBindValue(r.reporterId); q.addBindValue(r.targetType); q.addBindValue(r.targetId);
     q.addBindValue(r.reasonType); q.addBindValue(r.description);
@@ -60,7 +60,7 @@ bool ReportsDAO::handle(int reportId, int handlerId, const QString &newStatus,
     return true;
 }
 
-Report ReportsDAO::getById(int id)//输入“举报记录的编号”，得到“这条举报的信息”，返回形式是一个 Report 对象
+Report ReportsDAO::getById(int id)
 {
     Report r;
     QSqlQuery q(DatabaseManager::instance().db());
