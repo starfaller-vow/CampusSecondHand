@@ -33,7 +33,7 @@ private:
     // 新消息推送防抖定时器：200ms 内的多条推送合并为一次消息列表刷新
     QTimer *m_msgDebounceTimer = nullptr;
 
-    // 余额自动刷新钩子：Tab6「个人中心」填装；收到交易/结算/退款推送时同步刷新余额和流水
+    // 余额流水自动刷新钩子：Tab6「个人中心」填装；收到交易/结算/退款推送时自动刷新流水
     std::function<void()> m_balanceRefreshHook;
 
     // === 各 Tab（指针先占位，后续模块填充）===
