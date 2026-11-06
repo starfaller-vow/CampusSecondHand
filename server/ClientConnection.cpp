@@ -42,6 +42,7 @@ bool isReadOnlyCommand(const QString &cmd)
         cs::cmd::MyBuys,
         cs::cmd::MySales,
         cs::cmd::AdminPaidTx,
+        cs::cmd::AdminDoneTx,
         cs::cmd::AdminRefundedTx,
         cs::cmd::AdminStats,
         cs::cmd::ListUsers,

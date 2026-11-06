@@ -27,6 +27,8 @@
 #include <QTextEdit>
 #include <QGroupBox>
 #include <QFormLayout>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QInputDialog>
 #include <QTimer>
 #include <QScrollArea>
@@ -916,9 +918,12 @@ void MainWindow::setupUI()
             auto *page = new QWidget();
             auto *l = new QVBoxLayout(page);
             auto *btnBar = new QHBoxLayout();
+            auto *searchEdit = new QLineEdit(page);
+            searchEdit->setPlaceholderText(QStringLiteral("搜索用户名、学号或用户 ID"));
+            searchEdit->setClearButtonEnabled(true);
             auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新"));
+            btnBar->addWidget(searchEdit, 1);
             btnBar->addWidget(refreshBtn);
-            btnBar->addStretch();
             l->addLayout(btnBar);
 
             auto *table = new QTableWidget(page);
@@ -932,9 +937,27 @@ void MainWindow::setupUI()
             table->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
             table->setEditTriggers(QAbstractItemView::NoEditTriggers);
             l->addWidget(table);
+            auto *noMatches = new QLabel(QStringLiteral("没有找到匹配的用户"), page);
+            noMatches->hide();
+            l->addWidget(noMatches);
+
+            auto filterUsers = [table, noMatches](const QString &text) {
+                const QString keyword = text.trimmed();
+                bool hasMatch = false;
+                for (int row = 0; row < table->rowCount(); ++row) {
+                    const bool matches = keyword.isEmpty()
+                        || table->item(row, 1)->text().contains(keyword, Qt::CaseInsensitive)
+                        || table->item(row, 2)->text().contains(keyword)
+                        || table->item(row, 0)->text() == keyword;
+                    table->setRowHidden(row, !matches);
+                    hasMatch |= matches;
+                }
+                noMatches->setVisible(!keyword.isEmpty() && !hasMatch);
+            };
+            connect(searchEdit, &QLineEdit::textChanged, page, filterUsers);
 
             auto refreshUsers = std::make_shared<std::function<void()>>();//用来存刷新函数
-            *refreshUsers = [this, table, refreshUsers]() {
+            *refreshUsers = [this, table, searchEdit, filterUsers, refreshUsers]() {
                 table->setRowCount(0);
 
                 // C/S：从服务端拉取全部用户
@@ -1007,6 +1030,7 @@ void MainWindow::setupUI()
                     }
                     table->setCellWidget(row, 6, bw);//// 将这个装有按钮的容器控件bw，放到第6列（操作列）当前行单元格
                 }
+                filterUsers(searchEdit->text());
             };
             connect(refreshBtn, &QPushButton::clicked, [refreshUsers]() { (*refreshUsers)(); });//// 绑定顶部【刷新按钮】点击事件：点击就执行刷新函数
             registerLazy(page, *refreshUsers);
@@ -1508,14 +1532,15 @@ void MainWindow::setupUI()
             adminTabs->addTab(page, QStringLiteral("🚩 举报中心"));
         }
 
-        // ===== 子Tab 6: 交易管理（已付款→强制退款 / 已退款→恢复上架）=====
+        // ===== 子Tab 6: 交易管理 =====
         {
             auto *page = new QWidget();
             auto *l = new QVBoxLayout(page);
             auto *bar = new QHBoxLayout();
-            auto *statusFilter = new QComboBox();//`statusFilter`下拉选择框
-            statusFilter->addItem(QStringLiteral("💳 已付款"), "paid");
-            statusFilter->addItem(QStringLiteral("↩️ 已退款"), "refunded");
+            auto *statusFilter = new QComboBox();
+            statusFilter->addItem(QStringLiteral("💳 交易中"), QString::fromLatin1(cs::cmd::AdminPaidTx));
+            statusFilter->addItem(QStringLiteral("✅ 已完成"), QString::fromLatin1(cs::cmd::AdminDoneTx));
+            statusFilter->addItem(QStringLiteral("↩️ 已退款"), QString::fromLatin1(cs::cmd::AdminRefundedTx));
             auto *refreshBtn = new QPushButton(QStringLiteral("🔄 刷新"));
             bar->addWidget(new QLabel(QStringLiteral("状态：")));
             bar->addWidget(statusFilter);
@@ -1530,24 +1555,27 @@ void MainWindow::setupUI()
                 QStringLiteral("商品"), QStringLiteral("金额"), QStringLiteral("操作")
             });
             table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+            table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+            table->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
             table->setEditTriggers(QAbstractItemView::NoEditTriggers);
             table->setSelectionBehavior(QAbstractItemView::SelectRows);
             l->addWidget(table);
             //清空表格，根据下拉框选中的状态，查询对应交易记录，循环逐行填充交易表格，并且准备操作列的按钮容器
             auto refreshTx = std::make_shared<std::function<void()>>();
             *refreshTx = [this, table, statusFilter, refreshTx]() {
+                const QString command = statusFilter->currentData().toString();
                 table->setRowCount(0);
-                QString filterStatus = statusFilter->currentData().toString();
 
-                // C/S：按状态拉取交易（已付款 / 已退款）
+                // C/S：按状态拉取交易
                 QJsonObject data;
                 QString err;
-                if (!ClientConnector::instance().request(
-                        filterStatus == "paid" ? cs::cmd::AdminPaidTx : cs::cmd::AdminRefundedTx,
-                        {}, data, err)) {
+                const bool ok = ClientConnector::instance().request(command, {}, data, err);
+                if (statusFilter->currentData().toString() != command) return;
+                if (!ok) {
                     QMessageBox::warning(this, QStringLiteral("失败"), err);
                     return;
                 }
+                table->setRowCount(0);
                 QList<Transaction> txs;
                 for (const auto &v : data.value("transactions").toArray()) {
                     txs.append(jsoncv::transactionFromJson(v.toObject()));
@@ -1564,16 +1592,53 @@ void MainWindow::setupUI()
                         t.sellerName.isEmpty() ? QStringLiteral("（未知）") : t.sellerName));//卖家用户名
                     table->setItem(row, 3, new QTableWidgetItem(
                         t.goodsExists ? t.goodsTitle : QStringLiteral("（商品已删除）")));//商品标题
-                    table->setItem(row, 4, new QTableWidgetItem(
-                        t.goodsExists
-                            ? QStringLiteral("¥%1").arg(t.goodsPrice, 0, 'f', 2)
-                            : QStringLiteral("—")));//金额，格式化输出人民币，保留 2 位小数
+                    QString amountText = QStringLiteral("—");
+                    if (t.tradeAmount.has_value()) {
+                        amountText = QStringLiteral("¥%1").arg(*t.tradeAmount, 0, 'f', 2);
+                    } else if (t.status != "done" && t.goodsExists) {
+                        amountText = QStringLiteral("¥%1").arg(t.goodsPrice, 0, 'f', 2);
+                    }
+                    table->setItem(row, 4, new QTableWidgetItem(amountText));
 
                     auto *btnWidget = new QWidget();
                     auto *btnL = new QHBoxLayout(btnWidget);
                     btnL->setContentsMargins(2, 2, 2, 2);
 
-                    if (filterStatus == "paid") {
+                    if (t.status == "done") {
+                        auto *detailsBtn = new QPushButton(QStringLiteral("查看详情"));
+                        connect(detailsBtn, &QPushButton::clicked, this, [this, t, amountText]() {
+                            QDialog dialog(this);
+                            dialog.setWindowTitle(QStringLiteral("交易详情"));
+                            dialog.setMinimumWidth(420);
+                            auto *form = new QFormLayout(&dialog);
+                            auto addField = [&dialog, form](const QString &name, const QString &value) {
+                                auto *label = new QLabel(value.isEmpty() ? QStringLiteral("未记录") : value,
+                                                         &dialog);
+                                label->setTextFormat(Qt::PlainText);
+                                label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+                                label->setWordWrap(true);
+                                form->addRow(name, label);
+                            };
+                            addField(QStringLiteral("交易 ID"), QString::number(t.id));
+                            addField(QStringLiteral("状态"), QStringLiteral("已完成"));
+                            addField(QStringLiteral("商品 ID"), QString::number(t.goodsId));
+                            addField(QStringLiteral("商品"), t.goodsExists
+                                ? t.goodsTitle : QStringLiteral("（商品已删除）"));
+                            addField(QStringLiteral("买家"), t.buyerName);
+                            addField(QStringLiteral("买家学号"), t.buyerStudentNo);
+                            addField(QStringLiteral("卖家"), t.sellerName);
+                            addField(QStringLiteral("卖家学号"), t.sellerStudentNo);
+                            addField(QStringLiteral("成交金额"), t.tradeAmount ? amountText : QString());
+                            addField(QStringLiteral("创建时间"), t.createTime);
+                            addField(QStringLiteral("完成时间"), t.finishTime);
+                            addField(QStringLiteral("交易备注"), t.remark);
+                            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+                            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                            form->addRow(buttons);
+                            dialog.exec();
+                        });
+                        btnL->addWidget(detailsBtn);
+                    } else if (t.status == "paid") {
                         auto *refundBtn = new QPushButton(QStringLiteral("💰 强制退款"));
                         refundBtn->setStyleSheet("background:#C62828;color:white;padding:2px 8px;border-radius:3px;");
                         connect(refundBtn, &QPushButton::clicked, this, [this, t, refreshTx]() {

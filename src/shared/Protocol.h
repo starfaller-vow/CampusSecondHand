@@ -89,6 +89,7 @@ inline const char *ConfirmTx        = "tx.confirm";
 inline const char *MyBuys           = "tx.myBuys";
 inline const char *MySales          = "tx.mySales";
 inline const char *AdminPaidTx      = "tx.adminPaid";
+inline const char *AdminDoneTx      = "tx.adminDone";
 inline const char *AdminRefundedTx  = "tx.adminRefunded";
 inline const char *AdminRefund      = "tx.adminRefund";
 

@@ -128,6 +128,11 @@ QJsonObject txJsonForAdmin(const Transaction &t)
     o.insert("buyerStudentNo", buyer.studentNo);
     o.insert("sellerName", seller.username);
     o.insert("sellerStudentNo", seller.studentNo);
+    if (t.status == "done") {
+        if (const auto amount = EscrowDAO::amountForTransaction(t.id)) {
+            o.insert("tradeAmount", *amount);
+        }
+    }
     return o;
 }
 
@@ -660,17 +665,12 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     }
 
     // ---- 交易管理 ----
-    if (cmd == cs::cmd::AdminPaidTx) {
+    if (cmd == cs::cmd::AdminPaidTx || cmd == cs::cmd::AdminDoneTx || cmd == cs::cmd::AdminRefundedTx) {
+        QString status = QStringLiteral("refunded");
+        if (cmd == cs::cmd::AdminPaidTx) status = QStringLiteral("paid");
+        if (cmd == cs::cmd::AdminDoneTx) status = QStringLiteral("done");
         QJsonArray arr;
-        for (const Transaction &t : TransactionsDAO::getByStatus("paid")) {
-            arr.append(txJsonForAdmin(t));
-        }
-        return QJsonObject{ {"transactions", arr} };
-    }
-
-    if (cmd == cs::cmd::AdminRefundedTx) {
-        QJsonArray arr;
-        for (const Transaction &t : TransactionsDAO::getByStatus("refunded")) {
+        for (const Transaction &t : TransactionsDAO::getByStatus(status)) {
             arr.append(txJsonForAdmin(t));
         }
         return QJsonObject{ {"transactions", arr} };

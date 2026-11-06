@@ -59,6 +59,17 @@ bool EscrowDAO::transitionIfHeld(int txId, const QString &toStatus,
     return true;
 }
 
+std::optional<double> EscrowDAO::amountForTransaction(int txId)
+{
+    QSqlQuery q(DatabaseManager::instance().db());
+    q.prepare("SELECT amount FROM escrow WHERE tx_id = ?");
+    q.addBindValue(txId);
+    if (q.exec() && q.next()) {
+        return q.value(0).toDouble();
+    }
+    return std::nullopt;
+}
+
 double EscrowDAO::heldTotal()
 {
     QSqlQuery q(DatabaseManager::instance().db());

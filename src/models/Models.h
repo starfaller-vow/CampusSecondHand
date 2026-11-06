@@ -4,6 +4,7 @@
 #include <QString>
 #include <QStringList>
 #include <QDateTime>
+#include <optional>
 
 // ============== 用户 ==============
 struct User
@@ -81,6 +82,7 @@ struct Transaction
     // 仅展示用（非数据库字段）：列表接口一次性附带下发，避免客户端逐行 N+1 查询
     QString goodsTitle;         // 商品标题
     double goodsPrice = 0;      // 成交时价格（取商品现价）
+    std::optional<double> tradeAmount; // 管理员已完成交易的历史托管金额
     bool goodsExists = false;   // 商品是否仍存在（可能被删除）
     QString goodsStatus;        // 商品当前状态（管理员视图，用于举报下架判断）
     QString goodsOffReason;     // 商品下架原因（管理员视图）

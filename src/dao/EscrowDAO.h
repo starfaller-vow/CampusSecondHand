@@ -2,6 +2,7 @@
 #define ESCROWDAO_H
 
 #include <QString>
+#include <optional>
 
 /**
  * @brief 平台资金托管表 DAO（担保交易）
@@ -24,6 +25,8 @@ public:
     static bool transitionIfHeld(int txId, const QString &toStatus,
                                  double &amountOut, double &feeOut,
                                  QString &errorMsg);
+
+    static std::optional<double> amountForTransaction(int txId);
 
     // 托管中资金总额（管理员统计用）
     static double heldTotal();
