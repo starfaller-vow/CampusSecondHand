@@ -31,6 +31,7 @@ double GoodsManager::suggestPrice(const QString &condition, double originalPrice
 // ==================== 敏感词检查 ====================
 
 bool GoodsManager::containsSensitiveWord(const QString &text, QString &hitWord)
+//用来**检查传入的文本里是否包含敏感词**，如果命中，把匹配到的敏感词放到引用参数 `hitWord` 里，返回 true；没命中返回 false
 {
     const QStringList &words = DatabaseManager::instance().sensitiveWords();
     for (const QString &w : words) {
@@ -44,6 +45,8 @@ bool GoodsManager::containsSensitiveWord(const QString &text, QString &hitWord)
 
 // ==================== 内部：图片拷贝到 images/ 并生成 JSON ====================
 static QString copyImagesAndMakeJson(const QStringList &localPaths, QString &errorMsg)
+//客户端把本地图片路径传给服务端，服务端把客户端发来的这些图片，**复制到服务端自己的程序运行目录下的 images 文件夹**，
+// 然后生成一段 JSON，JSON 里面存 `images/xxx.jpg` 这种相对路径，之后这条 JSON 一般会存到数据库里
 {
     QString appDir = QCoreApplication::applicationDirPath();
     QString imagesDir = appDir + "/images";
@@ -200,7 +203,7 @@ bool GoodsManager::offShelf(int goodsId, int operatorId, QString &errorMsg)//`op
     Goods g = GoodsDAO::getById(goodsId);
     if (g.id == 0) { errorMsg = QStringLiteral("商品不存在"); return false; }
     if (g.sellerId != operatorId) { errorMsg = QStringLiteral("无权操作"); return false; }
-    return GoodsDAO::setStatus(goodsId, "off_shelf", errorMsg);
+    return GoodsDAO::setStatus(goodsId, "off_shelf", errorMsg);//`off_shelf`：下架
 }
 
 bool GoodsManager::onShelf(int goodsId, int operatorId, QString &errorMsg)
@@ -214,12 +217,12 @@ bool GoodsManager::onShelf(int goodsId, int operatorId, QString &errorMsg)
         errorMsg = QStringLiteral("商品因举报被下架，请联系管理员申请恢复");
         return false;
     }
-    return GoodsDAO::setStatus(goodsId, "on_sale", errorMsg);
+    return GoodsDAO::setStatus(goodsId, "on_sale", errorMsg);//`on_sale`：上架售卖
 }
 
 bool GoodsManager::markSold(int goodsId, QString &errorMsg)
 {
-    return GoodsDAO::setStatus(goodsId, "sold", errorMsg);
+    return GoodsDAO::setStatus(goodsId, "sold", errorMsg);//`sold`：已售出
 }
 
 // ==================== 删除 ====================
@@ -230,6 +233,7 @@ bool GoodsManager::deleteGoods(int goodsId, int operatorId, QString &errorMsg)
     if (g.id == 0) { errorMsg = QStringLiteral("商品不存在"); return false; }
     if (g.sellerId != operatorId) {
         // 管理员也可以删
+        //管理员（可以删除任何人的商品）
         User u = UserDAO::getById(operatorId);
         if (!u.isAdmin()) {
             errorMsg = QStringLiteral("无权删除该商品");
@@ -242,6 +246,7 @@ bool GoodsManager::deleteGoods(int goodsId, int operatorId, QString &errorMsg)
 // ==================== 查询 ====================
 
 QList<Goods> GoodsManager::browseOnSale(const GoodsDAO::QueryOptions &opt)
+//浏览在售商品
 {
     GoodsDAO::QueryOptions o = opt;
     o.status = "on_sale";

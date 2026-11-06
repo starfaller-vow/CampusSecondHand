@@ -22,11 +22,11 @@ TransactionsManager &TransactionsManager::instance()
 
 // ==================== 手续费计算 ====================
 
-double TransactionsManager::calculateFee(double amount)
+double TransactionsManager::calculateFee(double amount)//`amount`：交易金额
 {
     double threshold = SettingsDAO::feeThreshold();
     double rate      = SettingsDAO::feeRate();
-    double taxable   = qMax(0.0, amount - threshold);
+    double taxable   = qMax(0.0, amount - threshold);//如果交易金额 ≤ 门槛，`amount - threshold` 是负数，`qMax` 会把 taxable 置为 0，也就是不用扣手续费
     return taxable * rate;
 }
 
@@ -370,6 +370,7 @@ bool TransactionsManager::settleToDone(int transactionId, const QString &reason,
 // ==================== 超时自动结算 ====================
 
 int TransactionsManager::autoSettleExpired(int maxCount)
+//`maxCount`：单次最多处理多少条，防止一次性处理上万条把数据库压垮，定时器分批跑
 {
     const int days = SettingsDAO::transactionTimeoutDays();
     int settled = 0;
@@ -408,16 +409,19 @@ bool TransactionsManager::confirmReceived(int transactionId, int buyerId,
 // ==================== 查询 ====================
 
 QList<Transaction> TransactionsManager::myBuys(int userId)
+//myBuys：**我买到的订单**，根据用户 ID，查询所有该用户作为买家的交易记录
 {
     return TransactionsDAO::getByBuyer(userId);
 }
 
 QList<Transaction> TransactionsManager::mySales(int userId)
+//mySales：**我卖出的订单**，查询该用户作为卖家的所有交易记录
 {
     return TransactionsDAO::getBySeller(userId);
 }
 
 Transaction TransactionsManager::getTransaction(int id)
+//mySales：**我卖出的订单**，查询该用户作为卖家的所有交易记录
 {
     return TransactionsDAO::getById(id);
 }

@@ -1,6 +1,7 @@
 #include "JsonConv.h"
 
 namespace jsoncv {
+    //项目的数据转换工具，负责在 C++ 对象和 JSON 数据之间转换，供客户端与服务端共用
 
 // ---------------- User ----------------
 

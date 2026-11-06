@@ -14,7 +14,7 @@ DatabaseManager &DatabaseManager::instance()
     return inst;
 }
 
-bool DatabaseManager::init(QString &errorMsg)
+bool DatabaseManager::init(QString &errorMsg)//初始化
 {
     if (!openConnection(errorMsg)) return false;
     if (!initSchema(errorMsg)) return false;
@@ -29,10 +29,10 @@ bool DatabaseManager::openConnection(QString &errorMsg)
     m_ownerThread = QThread::currentThreadId();
     m_db = QSqlDatabase::addDatabase("QSQLITE");
     // 数据库文件 = 程序同目录 + data.db
-    QString dbPath = QCoreApplication::applicationDirPath() + "/data.db";
+    QString dbPath = QCoreApplication::applicationDirPath() + "/data.db";//比如 exe 在 `D:/app/bin`，dbPath 就是 `D:/app/bin/data.db`
     m_db.setDatabaseName(dbPath);
 
-    if (!m_db.open()) {
+    if (!m_db.open()) {//尝试打开这个 db 文件
         errorMsg = m_db.lastError().text();
         return false;
     }
@@ -250,6 +250,8 @@ INSERT OR IGNORE INTO settings (key,value) VALUES
 }
 
 bool DatabaseManager::applyMigrations(QString &errorMsg)
+//以前写建表 SQL 的时候没设计这个字段，已经有用户在用旧的 `data.db` 文件了，不能直接删掉用户数据库重建；
+//所以写迁移代码，**程序自动兼容新旧数据库文件**
 {
     // 幂等迁移：老库补 goods.off_reason 列（举报下架原因）
     QSqlQuery check(m_db);
@@ -276,6 +278,7 @@ bool DatabaseManager::applyMigrations(QString &errorMsg)
 }
 
 bool DatabaseManager::ensureDefaultAdmin(QString &errorMsg)
+//保证系统一定有一个默认管理员账号
 {
     QSqlQuery q(m_db);
 
@@ -316,7 +319,7 @@ bool DatabaseManager::loadSensitiveWords(QString &errorMsg)
     Q_UNUSED(errorMsg);
 
     QString path = QCoreApplication::applicationDirPath() + "/words.txt";
-    QFile file(path);
+    QFile file(path);//创建 QFile 对象，绑定上面这个文件路径，用来读写这个 txt 文件
     m_sensitiveWords.clear();
 
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
