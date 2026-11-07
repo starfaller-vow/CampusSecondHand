@@ -1576,12 +1576,9 @@ void MainWindow::setupUI()
                     return;
                 }
                 table->setRowCount(0);
-                QList<Transaction> txs;
                 for (const auto &v : data.value("transactions").toArray()) {
-                    txs.append(jsoncv::transactionFromJson(v.toObject()));
-                }
-
-                for (const Transaction &t : txs) {
+                    const auto tx = v.toObject();
+                    const Transaction t = jsoncv::transactionFromJson(tx);
                     // 买家/卖家/商品信息已由列表接口一次性附带，无需逐行请求
                     int row = table->rowCount();
                     table->insertRow(row);
@@ -1592,53 +1589,69 @@ void MainWindow::setupUI()
                         t.sellerName.isEmpty() ? QStringLiteral("（未知）") : t.sellerName));//卖家用户名
                     table->setItem(row, 3, new QTableWidgetItem(
                         t.goodsExists ? t.goodsTitle : QStringLiteral("（商品已删除）")));//商品标题
-                    QString amountText = QStringLiteral("—");
-                    if (t.tradeAmount.has_value()) {
-                        amountText = QStringLiteral("¥%1").arg(*t.tradeAmount, 0, 'f', 2);
-                    } else if (t.status != "done" && t.goodsExists) {
+                    const auto tradeAmount = tx.value("tradeAmount");
+                    const QString tradeAmountText = tradeAmount.isDouble()
+                        ? QStringLiteral("¥%1").arg(tradeAmount.toDouble(), 0, 'f', 2)
+                        : QString();
+                    QString amountText = tradeAmountText;
+                    if (amountText.isEmpty() && t.status != "done" && t.goodsExists) {
                         amountText = QStringLiteral("¥%1").arg(t.goodsPrice, 0, 'f', 2);
                     }
-                    table->setItem(row, 4, new QTableWidgetItem(amountText));
+                    table->setItem(row, 4, new QTableWidgetItem(
+                        amountText.isEmpty() ? QStringLiteral("—") : amountText));
 
                     auto *btnWidget = new QWidget();
                     auto *btnL = new QHBoxLayout(btnWidget);
                     btnL->setContentsMargins(2, 2, 2, 2);
 
-                    if (t.status == "done") {
-                        auto *detailsBtn = new QPushButton(QStringLiteral("查看详情"));
-                        connect(detailsBtn, &QPushButton::clicked, this, [this, t, amountText]() {
-                            QDialog dialog(this);
-                            dialog.setWindowTitle(QStringLiteral("交易详情"));
-                            dialog.setMinimumWidth(420);
-                            auto *form = new QFormLayout(&dialog);
-                            auto addField = [&dialog, form](const QString &name, const QString &value) {
-                                auto *label = new QLabel(value.isEmpty() ? QStringLiteral("未记录") : value,
-                                                         &dialog);
-                                label->setTextFormat(Qt::PlainText);
-                                label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-                                label->setWordWrap(true);
-                                form->addRow(name, label);
-                            };
-                            addField(QStringLiteral("交易 ID"), QString::number(t.id));
-                            addField(QStringLiteral("状态"), QStringLiteral("已完成"));
-                            addField(QStringLiteral("商品 ID"), QString::number(t.goodsId));
-                            addField(QStringLiteral("商品"), t.goodsExists
-                                ? t.goodsTitle : QStringLiteral("（商品已删除）"));
-                            addField(QStringLiteral("买家"), t.buyerName);
-                            addField(QStringLiteral("买家学号"), t.buyerStudentNo);
-                            addField(QStringLiteral("卖家"), t.sellerName);
-                            addField(QStringLiteral("卖家学号"), t.sellerStudentNo);
-                            addField(QStringLiteral("成交金额"), t.tradeAmount ? amountText : QString());
-                            addField(QStringLiteral("创建时间"), t.createTime);
+                    const QString refundTime = tx.value("refundTime").toString();
+                    auto *detailsBtn = new QPushButton(QStringLiteral("查看详情"));
+                    connect(detailsBtn, &QPushButton::clicked, this, [this, t, tradeAmountText, refundTime]() {
+                        QDialog dialog(this);
+                        dialog.setWindowTitle(QStringLiteral("交易详情"));
+                        dialog.setMinimumWidth(420);
+                        auto *form = new QFormLayout(&dialog);
+                        auto addField = [&dialog, form](const QString &name, const QString &value) {
+                            auto *label = new QLabel(value.isEmpty() ? QStringLiteral("未记录") : value, &dialog);
+                            label->setTextFormat(Qt::PlainText);
+                            label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+                            label->setWordWrap(true);
+                            form->addRow(name, label);
+                        };
+                        QString statusText = QStringLiteral("已完成");
+                        QString amountLabel = QStringLiteral("成交金额");
+                        if (t.status == "paid") {
+                            statusText = QStringLiteral("交易中");
+                            amountLabel = QStringLiteral("托管金额");
+                        } else if (t.status == "refunded") {
+                            statusText = QStringLiteral("已退款");
+                            amountLabel = QStringLiteral("退款金额");
+                        }
+                        addField(QStringLiteral("交易 ID"), QString::number(t.id));
+                        addField(QStringLiteral("状态"), statusText);
+                        addField(QStringLiteral("商品 ID"), QString::number(t.goodsId));
+                        addField(QStringLiteral("商品"), t.goodsExists
+                            ? t.goodsTitle : QStringLiteral("（商品已删除）"));
+                        addField(QStringLiteral("买家"), t.buyerName);
+                        addField(QStringLiteral("买家学号"), t.buyerStudentNo);
+                        addField(QStringLiteral("卖家"), t.sellerName);
+                        addField(QStringLiteral("卖家学号"), t.sellerStudentNo);
+                        addField(amountLabel, tradeAmountText);
+                        addField(QStringLiteral("创建时间"), t.createTime);
+                        if (t.status == "done") {
                             addField(QStringLiteral("完成时间"), t.finishTime);
-                            addField(QStringLiteral("交易备注"), t.remark);
-                            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-                            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-                            form->addRow(buttons);
-                            dialog.exec();
-                        });
-                        btnL->addWidget(detailsBtn);
-                    } else if (t.status == "paid") {
+                        } else if (t.status == "refunded") {
+                            addField(QStringLiteral("退款时间"), refundTime);
+                        }
+                        addField(QStringLiteral("交易备注"), t.remark);
+                        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+                        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                        form->addRow(buttons);
+                        dialog.exec();
+                    });
+                    btnL->addWidget(detailsBtn);
+
+                    if (t.status == "paid") {
                         auto *refundBtn = new QPushButton(QStringLiteral("💰 强制退款"));
                         refundBtn->setStyleSheet("background:#C62828;color:white;padding:2px 8px;border-radius:3px;");
                         connect(refundBtn, &QPushButton::clicked, this, [this, t, refreshTx]() {
@@ -1659,7 +1672,7 @@ void MainWindow::setupUI()
                             }
                         });
                         btnL->addWidget(refundBtn);
-                    } else if (t.goodsStatus == "off_shelf" && t.goodsOffReason == "report") {
+                    } else if (t.status == "refunded" && t.goodsStatus == "off_shelf" && t.goodsOffReason == "report") {
                         // 已退款且商品处于举报下架 → 管理员可恢复上架
                         auto *restoreBtn = new QPushButton(QStringLiteral("恢复上架"));
                         restoreBtn->setStyleSheet("background:#2196F3;color:white;padding:2px 8px;border-radius:3px;");
@@ -1676,7 +1689,7 @@ void MainWindow::setupUI()
                             }
                         });
                         btnL->addWidget(restoreBtn);
-                    } else {
+                    } else if (t.status == "refunded") {
                         btnL->addWidget(new QLabel(QStringLiteral("商品已在售")));
                     }
                     btnL->addStretch();

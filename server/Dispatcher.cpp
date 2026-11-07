@@ -128,9 +128,12 @@ QJsonObject txJsonForAdmin(const Transaction &t)
     o.insert("buyerStudentNo", buyer.studentNo);
     o.insert("sellerName", seller.username);
     o.insert("sellerStudentNo", seller.studentNo);
-    if (t.status == "done") {
-        if (const auto amount = EscrowDAO::amountForTransaction(t.id)) {
-            o.insert("tradeAmount", *amount);
+    double amount = 0;
+    QString escrowFinishTime;
+    if (EscrowDAO::getAmountAndFinishTime(t.id, amount, escrowFinishTime)) {
+        o.insert("tradeAmount", amount);
+        if (t.status == "refunded") {
+            o.insert("refundTime", escrowFinishTime);
         }
     }
     return o;

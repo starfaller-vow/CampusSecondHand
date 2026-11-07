@@ -133,8 +133,6 @@ Transaction transactionFromJson(const QJsonObject &o)
     // 展示附带字段（列表接口才有，缺失时保持默认值，不影响详情等接口）
     t.goodsTitle    = o.value("goodsTitle").toString();
     t.goodsPrice    = o.value("goodsPrice").toDouble();
-    const auto tradeAmount = o.value("tradeAmount");
-    if (tradeAmount.isDouble()) t.tradeAmount = tradeAmount.toDouble();
     t.goodsExists   = o.value("goodsExists").toBool();
     t.goodsStatus   = o.value("goodsStatus").toString();
     t.goodsOffReason = o.value("goodsOffReason").toString();
