@@ -36,6 +36,7 @@
 #include <QFont>
 #include <QPair>
 #include <QHash>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QDebug>
 #include <algorithm>
@@ -61,6 +62,14 @@ void MainWindow::setupUI()
 
     m_tabWidget = new QTabWidget(this);
     setCentralWidget(m_tabWidget);
+    auto *accountStatus = new QLabel(this);
+    accountStatus->setTextFormat(Qt::PlainText);
+    statusBar()->addWidget(accountStatus);
+    auto renderAccountStatus = [this, accountStatus]() {
+        accountStatus->setText(QStringLiteral("欢迎，%1 | 学号：%2 | 余额：¥%3")
+            .arg(m_user.username, m_user.studentNo, QString::number(m_user.balance, 'f', 2)));
+    };
+    renderAccountStatus();
 
     // 消息刷新钩子（Tab5 填装；服务端推送新消息时由外部触发刷新）
     std::shared_ptr<std::function<void()>> msgRefreshHook;
@@ -603,8 +612,7 @@ void MainWindow::setupUI()
             m_msgDebounceTimer->setSingleShot(true);
             connect(m_msgDebounceTimer, &QTimer::timeout, this, [this, refreshMsg]() {
                 refreshMsg();
-                // 交易结算/退款等余额变动都伴随消息推送，顺带刷新余额流水，
-                // 使卖家到账收入无需手动点刷新即可显示
+                // 交易消息到达后同步更新账户余额和流水。
                 if (m_balanceRefreshHook) m_balanceRefreshHook();
             });
         }
@@ -666,16 +674,8 @@ void MainWindow::setupUI()
             "QLabel { background:#FAFAFA; padding:20px; border-radius:8px; "
             "font-size:14px; line-height:1.8px; }"
         );
-        auto refreshInfo = [this, infoBox]() {
-            // C/S：从服务端拉取自己的最新信息
-            QJsonObject data;
-            QString err;
-            if (!ClientConnector::instance().request(cs::cmd::Self, {}, data, err)) {
-                QMessageBox::warning(this, QStringLiteral("失败"), err);
-                return;
-            }
-            User fresh = jsoncv::userFromJson(data.value("user").toObject());
-            m_user = fresh;//用服务端最新用户信息覆盖内存里的`m_user`变量，保证数据是最新的。
+        auto renderProfile = [this, infoBox, renderAccountStatus]() {
+            const User &fresh = m_user;
             QString roleText = fresh.isAdmin() ? QStringLiteral("🛡️ 管理员") : QStringLiteral("👤 普通用户");//身份
             infoBox->setText(QStringLiteral(
                 "<h3 style='margin:0 0 10px 0;'>%1</h3>"//用户名
@@ -689,7 +689,8 @@ void MainWindow::setupUI()
                   fresh.college.isEmpty() ? QStringLiteral("—") : fresh.college,
                   fresh.contact.isEmpty() ? QStringLiteral("未设置") : fresh.contact,
                   fresh.createTime,
-                  QStringLiteral("¥%1").arg(fresh.balance, 0, 'f', 2)));
+                  QString::number(fresh.balance, 'f', 2)));
+            renderAccountStatus();
         };
         leftL->addWidget(infoBox);
 
@@ -741,24 +742,29 @@ void MainWindow::setupUI()
         balTable->setSelectionBehavior(QAbstractItemView::SelectRows);
         rightL->addWidget(balTable);
 
-        auto refreshBalanceLog = [this, balTable]() {//刷新余额变动记录表
-            balTable->setRowCount(0);
-
-            // C/S：从服务端拉取余额流水
+        auto refreshSequence = std::make_shared<quint64>(0);
+        auto refreshAccount = [this, balTable, renderProfile, refreshSequence]() {
+            const QPointer<MainWindow> window(this);
+            const quint64 sequence = ++*refreshSequence;
             QJsonObject data;
             QString err;
-            if (!ClientConnector::instance().request(cs::cmd::BalanceLogs, {}, data, err)) {
+            const bool ok = ClientConnector::instance().request(cs::cmd::BalanceLogs, {}, data, err);
+            if (!window || sequence != *refreshSequence || m_goingBackToLogin) return;
+            if (!ok) {
                 QMessageBox::warning(this, QStringLiteral("失败"), err);
                 return;
             }
-            QList<BalanceLog> logs;
-            for (const auto &v : data.value("logs").toArray()) {
-                logs.append(jsoncv::balanceLogFromJson(v.toObject()));
+            const User fresh = jsoncv::userFromJson(data.value("user").toObject());
+            if (fresh.id != m_user.id) {
+                QMessageBox::warning(this, QStringLiteral("失败"), QStringLiteral("无法读取最新账户信息，请检查服务端版本。"));
+                return;
             }
-            std::sort(logs.begin(), logs.end(), [](const BalanceLog &a, const BalanceLog &b) {
-                return a.createTime > b.createTime;//**新的余额记录排在最上方**（时间倒序）
-            });
-            for (const BalanceLog &l : logs) {
+            m_user = fresh;
+            renderProfile();
+            balTable->setRowCount(0);
+            // 保留服务端的流水 ID 倒序，避免时钟调整打乱入账顺序。
+            for (const auto &v : data.value("logs").toArray()) {
+                const BalanceLog l = jsoncv::balanceLogFromJson(v.toObject());
                 int row = balTable->rowCount();
                 balTable->insertRow(row);
                 QString typeText;
@@ -780,14 +786,13 @@ void MainWindow::setupUI()
                 balTable->setItem(row, 3, new QTableWidgetItem(l.createTime));
             }
         };
-        // 手动刷新按钮 + 推送触发的自动刷新钩子（交易结算/退款到账后无需手动点刷新）
-        connect(balRefreshBtn, &QPushButton::clicked, refreshBalanceLog);
-        m_balanceRefreshHook = refreshBalanceLog;
+        connect(balRefreshBtn, &QPushButton::clicked, this, refreshAccount);
+        m_balanceRefreshHook = refreshAccount;
         mainL->addWidget(leftPanel, 1);
         mainL->addWidget(rightPanel, 2);//权重 1 : 权重 2。水平方向空间分配比例：左侧占 1 份，右侧占 2 份，右边日志区域更宽
 
         // ===== 修改联系方式 =====
-        connect(contactBtn, &QPushButton::clicked, this, [this, refreshInfo]() {
+        connect(contactBtn, &QPushButton::clicked, this, [this, refreshAccount]() {
             bool ok;
             QString contact = QInputDialog::getText(this, QStringLiteral("修改联系方式"),
                 QStringLiteral("请输入新的联系方式："), QLineEdit::Normal,
@@ -798,14 +803,14 @@ void MainWindow::setupUI()
             if (ClientConnector::instance().request(cs::cmd::UpdateContact,
                     QJsonObject{ {"contact", contact} }, rdata, err)) {
                 QMessageBox::information(this, QStringLiteral("成功"), QStringLiteral("联系方式已更新"));
-                refreshInfo();
+                refreshAccount();
             } else {
                 QMessageBox::warning(this, QStringLiteral("失败"), err);
             }
         });
 
         // ===== 修改密码 =====
-        connect(pwdBtn, &QPushButton::clicked, this, [this, refreshInfo]() {
+        connect(pwdBtn, &QPushButton::clicked, this, [this]() {
             bool ok1, ok2, ok3;
             QString oldPwd = QInputDialog::getText(this, QStringLiteral("修改密码"),
                 QStringLiteral("请输入旧密码："), QLineEdit::Password, "", &ok1);
@@ -844,7 +849,7 @@ void MainWindow::setupUI()
         });
 
         // ===== 兑换充值码 =====
-        connect(redeemBtn, &QPushButton::clicked, this, [this, refreshInfo, refreshBalanceLog]() {
+        connect(redeemBtn, &QPushButton::clicked, this, [this, refreshAccount]() {
             bool ok;//`ok`用来判断用户是点了【确定】还是【取消】
             QString code = QInputDialog::getText(this, QStringLiteral("兑换充值码"),//弹出输入框
                 QStringLiteral("请输入充值码："), QLineEdit::Normal, "", &ok).trimmed();//去掉字符串前后多余空格，防止用户不小心输入空格导致兑换失败
@@ -856,8 +861,7 @@ void MainWindow::setupUI()
                 const double newBal = data.value("balance").toDouble();
                 QMessageBox::information(this, QStringLiteral("成功"),
                     QStringLiteral("兑换成功！新余额：¥%1").arg(newBal, 0, 'f', 2));
-                refreshInfo();
-                refreshBalanceLog();
+                refreshAccount();
             } else {
                 QMessageBox::warning(this, QStringLiteral("失败"), err);
             }
@@ -897,9 +901,8 @@ void MainWindow::setupUI()
                     QStringLiteral("反馈已发送给管理员，请耐心等待处理。"));
             });
         }
-        registerLazy(m_tabProfile, [refreshInfo, refreshBalanceLog]() {
-            refreshInfo();
-            refreshBalanceLog();
+        connect(m_tabWidget, &QTabWidget::currentChanged, this, [this, refreshAccount](int index) {
+            if (m_tabWidget->widget(index) == m_tabProfile) refreshAccount();
         });
     }
     m_tabWidget->addTab(m_tabProfile, QStringLiteral("👤 个人中心"));
@@ -1781,12 +1784,6 @@ void MainWindow::setupUI()
         runLazy(m_tabWidget->currentWidget());
     });
     runLazy(m_tabWidget->currentWidget()); // 默认页（商品浏览）立即首次加载
-
-    // 状态栏
-    statusBar()->showMessage(
-        QStringLiteral("欢迎，%1 | 学号：%2 | 余额：¥%3")
-            .arg(m_user.username).arg(m_user.studentNo).arg(m_user.balance)
-    );
 
     // C/S：订阅服务端推送与断线事件
     // 回登录（踢下线/断线共用，标志位防重复弹窗）

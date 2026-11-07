@@ -108,24 +108,21 @@ bool TransactionsManager::purchaseGoods(int buyerId, int goodsId, const QString 
     }
 
     // 4f. 写余额流水（托管模式下仅买家付款流水；卖家结算流水在确认收货时产生）
-    auto writeLog = [&](int uid, const QString &type, double amount,
-                        double balAfter, const QString &ref, const QString &rmk) {
-        BalanceLog l;
-        l.userId       = uid;
-        l.type         = type;
-        l.amount       = amount;
-        l.balanceAfter = balAfter;
-        l.refId        = ref;
-        l.remark       = rmk;
-        QString e;
-        BalanceLogsDAO::insert(l, e);
-    };
-    writeLog(buyerId, "consume", -g.currentPrice, buyerNewBal,
-             QString::number(t.id), QStringLiteral("购买商品（货款平台托管）：%1").arg(g.title));
+    BalanceLog log;
+    log.userId = buyerId;
+    log.type = "consume";
+    log.amount = -g.currentPrice;
+    log.balanceAfter = buyerNewBal;
+    log.refId = QString::number(t.id);
+    log.remark = QStringLiteral("购买商品（货款平台托管）：%1").arg(g.title);
+    if (!BalanceLogsDAO::insert(log, balErr)) {
+        rollback(QStringLiteral("余额流水写入失败：%1").arg(balErr));
+        return false;
+    }
 
     // 5. 提交事务
     if (!db.commit()) {
-        errorMsg = db.lastError().text();
+        rollback(db.lastError().text());
         return false;
     }
 
@@ -246,10 +243,13 @@ bool TransactionsManager::doRefund(int transactionId, const QString &newStatus,
     l.balanceAfter = buyerAfter;
     l.refId        = QString::number(t.id);
     l.remark       = QStringLiteral("退款（托管退回）：%1").arg(reason);
-    BalanceLogsDAO::insert(l, e);
+    if (!BalanceLogsDAO::insert(l, e)) {
+        rollback(QStringLiteral("余额流水写入失败：%1").arg(e));
+        return false;
+    }
 
     if (!db.commit()) {
-        errorMsg = db.lastError().text();
+        rollback(db.lastError().text());
         return false;
     }
 
@@ -332,7 +332,10 @@ bool TransactionsManager::settleToDone(int transactionId, const QString &reason,
     log1.balanceAfter = sellerAfter;
     log1.refId        = QString::number(t.id);
     log1.remark       = QStringLiteral("货款结算到账（%1）：%2").arg(reason, g.title);
-    BalanceLogsDAO::insert(log1, e);
+    if (!BalanceLogsDAO::insert(log1, e)) {
+        rollback(QStringLiteral("余额流水写入失败：%1").arg(e));
+        return false;
+    }
 
     if (fee > 0) {
         BalanceLog log2;
@@ -342,11 +345,14 @@ bool TransactionsManager::settleToDone(int transactionId, const QString &reason,
         log2.balanceAfter = sellerFinal;
         log2.refId        = QString::number(t.id);
         log2.remark       = QStringLiteral("平台手续费");
-        BalanceLogsDAO::insert(log2, e);
+        if (!BalanceLogsDAO::insert(log2, e)) {
+            rollback(QStringLiteral("余额流水写入失败：%1").arg(e));
+            return false;
+        }
     }
 
     if (!db.commit()) {
-        errorMsg = db.lastError().text();
+        rollback(db.lastError().text());
         return false;
     }
 

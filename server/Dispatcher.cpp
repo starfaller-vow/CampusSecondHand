@@ -493,11 +493,16 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
     }
 
     if (cmd == cs::cmd::BalanceLogs) {
+        const User user = UserDAO::getById(uid);
+        if (user.id == 0) {
+            err = QStringLiteral("无法读取账户信息");
+            return {};
+        }
         QJsonArray arr;
         for (const BalanceLog &l : BalanceLogsDAO::getByUser(uid)) {
             arr.append(jsoncv::balanceLogToJson(l));
         }
-        return QJsonObject{ {"logs", arr} };
+        return QJsonObject{ {"user", jsoncv::userToJson(user)}, {"logs", arr} };
     }
 
     // ==================== 举报（提交人人可为）====================
