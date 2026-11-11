@@ -61,7 +61,8 @@ struct Goods
     bool isReserved()  const { return status == "reserved"; }
     bool isSold()      const { return status == "sold"; }
     bool isOffShelf()  const { return status == "off_shelf"; }
-    bool isReportOff() const { return status == "off_shelf" && offReason == "report"; }
+    bool isReportOff() const { return isOffShelf() && offReason == "report"; }
+    bool isReportRestricted() const { return isOffShelf() && (offReason == "report" || offReason == "report_pending"); }
 };
 
 // ============== 交易 ==============

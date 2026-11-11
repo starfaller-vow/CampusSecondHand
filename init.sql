@@ -154,3 +154,35 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('coef_七成新',          '0.40'),
     ('coef_六成新及以下',    '0.30'),
     ('transaction_timeout_days', '3');
+
+-- 第 29 次提交：举报处置、复核与私有照片
+CREATE TABLE IF NOT EXISTS report_dispositions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER UNIQUE REFERENCES reports(id),
+    goods_id INTEGER NOT NULL,
+    seller_id INTEGER NOT NULL REFERENCES users(id),
+    tx_id INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL CHECK (state IN ('awaiting_trade','awaiting_action','down','lifted','closed')),
+    reason TEXT NOT NULL,
+    down_admin_id INTEGER REFERENCES users(id),
+    down_time TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_report_dispositions_goods ON report_dispositions(goods_id, state);
+CREATE INDEX IF NOT EXISTS idx_report_dispositions_trade ON report_dispositions(tx_id, state);
+CREATE INDEX IF NOT EXISTS idx_report_pending_lookup ON reports(reporter_id, target_type, target_id, status);
+
+CREATE TABLE IF NOT EXISTS report_reviews (
+    case_id INTEGER PRIMARY KEY REFERENCES report_dispositions(id),
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied')),
+    create_time TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    handler_id INTEGER REFERENCES users(id),
+    reason TEXT,
+    handle_time TEXT
+);
+CREATE TABLE IF NOT EXISTS report_review_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES report_reviews(case_id),
+    content BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_report_review_photos_case ON report_review_photos(case_id);

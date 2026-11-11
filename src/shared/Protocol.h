@@ -6,6 +6,7 @@
 #include <QList>
 #include <QPair>
 #include <QString>
+#include <QStringList>
 #include <QtGlobal>
 
 // ============================================================
@@ -32,6 +33,19 @@ enum class FrameType : quint8 {
 };
 
 // ---------------- 命令名常量 ----------------
+constexpr int ReviewPhotoLimit = 3;
+constexpr int ReviewPhotoMiB = 5;
+constexpr int ReviewPhotoBytes = ReviewPhotoMiB * 1024 * 1024;
+
+inline const QStringList &goodsReportCategories()
+{
+    static const QStringList categories = {
+        QStringLiteral("虚假商品"), QStringLiteral("描述不符"),
+        QStringLiteral("欺诈行为"), QStringLiteral("其他")
+    };
+    return categories;
+}
+
 namespace cmd {
 inline const char *Login            = "auth.login";
 inline const char *Register         = "auth.register";
@@ -74,7 +88,13 @@ inline const char *ContactAdmin     = "message.contactAdmin"; // 联系管理员
 
 inline const char *ReportSubmit     = "report.submit";
 inline const char *ReportList       = "report.list";
-inline const char *ReportHandle     = "report.handle";     // resolved / rejected / refunded
+inline const char *ReportHandle     = "report.handle";     // resolved / rejected / release
+inline const char *ReviewCases      = "report.reviewCases";
+inline const char *ReviewDetails    = "report.reviewDetails";
+inline const char *ReviewSubmit     = "report.reviewSubmit";
+inline const char *ReviewAddPhotos  = "report.reviewAddPhotos";
+inline const char *ReviewPhoto      = "report.reviewPhoto";
+inline const char *ReviewDecide     = "report.reviewDecide";
 
 inline const char *RedeemGenerate   = "redeem.generate";
 inline const char *Redeem           = "redeem.redeem";

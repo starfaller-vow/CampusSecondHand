@@ -18,6 +18,7 @@
 #include "FavoritesDAO.h"
 #include "MessagesDAO.h"
 #include "ReportsDAO.h"
+#include "ReportReview.h"
 #include "RedeemCodesDAO.h"
 #include "BalanceLogsDAO.h"
 #include "SettingsDAO.h"
@@ -224,10 +225,18 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
         return QJsonObject{ {"goods", arr} };
     }
 
-    // ---- 商品详情（任何人可看，购买需要登录）----
+    // ---- 商品详情，举报处置中的商品仅卖家与管理员可见 ----
     if (cmd == cs::cmd::GoodsDetail) {
         const Goods g = GoodsDAO::getById(p.value("goodsId").toInt());
         if (g.id == 0) { err = QStringLiteral("商品不存在"); return {}; }
+        if (g.isReportRestricted()) {
+            int viewer = 0;
+            if (!tokenUserId(token, viewer)
+                || (viewer != g.sellerId && !UserDAO::getById(viewer).isAdmin())) {
+                err = QStringLiteral("商品暂不可用");
+                return {};
+            }
+        }
         return QJsonObject{
             {"goods", goodsJsonWithContext(g)},
             {"fee", TransactionsManager::calculateFee(g.currentPrice)} // 供客户端支付确认弹窗显示
@@ -382,7 +391,13 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
         // 返回收藏的商品列表（客户端卡片直接渲染）；已删除的商品跳过
         for (const Favorite &f : FavoritesDAO::getByUser(uid)) {
             const Goods g = GoodsDAO::getById(f.goodsId);
-            if (g.id != 0) arr.append(goodsJsonWithContext(g));
+            if (g.id == 0) continue;
+            if (g.isReportRestricted() && g.sellerId != uid && !UserDAO::getById(uid).isAdmin()) {
+                arr.append(QJsonObject{{"id", g.id}, {"title", QStringLiteral("商品暂不可用")},
+                                       {"status", "off_shelf"}, {"unavailable", true}});
+            } else {
+                arr.append(goodsJsonWithContext(g));
+            }
         }
         return QJsonObject{ {"goods", arr} };
     }
@@ -512,13 +527,34 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
         r.reporterId  = uid;
         r.targetType  = p.value("targetType").toString();
         r.targetId    = p.value("targetId").toInt();
-        r.reasonType  = p.value("reasonType").toString();
+        r.reasonType  = p.value("reasonType").toString().trimmed();
         r.description = p.value("description").toString().trimmed();
         if (r.description.size() < 10) {
             err = QStringLiteral("详细描述至少10字"); return {};
         }
-        if (!ReportsDAO::insert(r, err)) return {};
+        if (!reportreview::submitReport(r, err)) return {};
         return QJsonObject{};
+    }
+
+    if (cmd == cs::cmd::ReviewCases) {
+        const int sellerId = UserDAO::getById(uid).isAdmin() ? 0 : uid;
+        return {{"cases", reportreview::sellerCases(p.value("goodsId").toInt(), sellerId, err)}};
+    }
+    if (cmd == cs::cmd::ReviewDetails) {
+        return reportreview::caseDetails(p.value("caseId").toInt(), uid, UserDAO::getById(uid).isAdmin(), err);
+    }
+    if (cmd == cs::cmd::ReviewPhoto) {
+        return reportreview::photo(p.value("photoId").toInt(), uid, UserDAO::getById(uid).isAdmin(), err);
+    }
+    if (cmd == cs::cmd::ReviewSubmit || cmd == cs::cmd::ReviewAddPhotos) {
+        const int caseId = p.value("caseId").toInt();
+        const QJsonArray photos = p.value("photos").toArray();
+        if (cmd == cs::cmd::ReviewSubmit) {
+            reportreview::submitReview(caseId, uid, p.value("description").toString().trimmed(), photos, err);
+        } else {
+            reportreview::addPhotos(caseId, uid, photos, err);
+        }
+        return {};
     }
 
     // ==================== 管理员专区 ====================
@@ -620,56 +656,44 @@ QJsonObject Dispatcher::handle(const QString &cmd, const QJsonObject &p,
 
     // ---- 举报处理 ----
     if (cmd == cs::cmd::ReportList) {
+        const QString filter = p.value("status").toString();
+        const bool byDisposition = filter == "awaiting_trade" || filter == "awaiting_action"
+                                || filter == "review_pending" || filter == "refunded";
         QJsonArray arr;
-        for (const Report &r : ReportsDAO::getAll(p.value("status").toString())) {
-            arr.append(reportJsonWithContext(r));
+        for (const Report &r : ReportsDAO::getAll(byDisposition ? QString{} : filter)) {
+            const QJsonObject disposition = reportreview::reportContext(r.id, err);
+            if (!err.isEmpty()) return {};
+            if (filter == "refunded" && r.status != filter
+                && disposition.value("tradeStatus").toString() != filter) continue;
+            if ((filter == "awaiting_trade" || filter == "awaiting_action")
+                && disposition.value("state").toString() != filter) continue;
+            if (filter == "review_pending"
+                && disposition.value("review").toObject().value("status").toString() != "pending") continue;
+            QJsonObject item = reportJsonWithContext(r);
+            item.insert("disposition", disposition);
+            arr.append(item);
         }
-        return QJsonObject{ {"reports", arr} };
+        return {{"reports", arr}};
     }
 
-    if (cmd == cs::cmd::ReportHandle) {
-        const int reportId = p.value("reportId").toInt();
-        const QString newStatus = p.value("newStatus").toString();
-        const QString note = p.value("note").toString().trimmed();
-
-        // resolved：若目标是商品且在售 → 举报下架 + 通知卖家（消息由事务外发送）
-        if (newStatus == "resolved") {
-            Report r = ReportsDAO::getById(reportId);
-            if (r.targetType == "goods") {
-                Goods g = GoodsDAO::getById(r.targetId);
-                QString e2;
-                if (g.id != 0 && g.isOnSale()) {
-                    // 举报处理 + 下架 放一个事务里
-                    QSqlDatabase db = DatabaseManager::instance().db();
-                    if (db.transaction()) {
-                        ReportsDAO::handle(reportId, uid, "resolved", note, e2);
-                        if (!GoodsDAO::offShelfByReport(g.id, e2)) {
-                            db.rollback();
-                            err = e2; return {};
-                        }
-                        db.commit();
-                        MessagesDAO::insert(g.sellerId,
-                            QStringLiteral("🚩 商品因举报被下架"),
-                            QStringLiteral("你的商品「%1」经管理员审核后已被下架，暂时无法自行重新上架。\n处理备注：%2")
-                                .arg(g.title, note.isEmpty() ? QStringLiteral("（无）") : note),
-                            "system");
-                        return QJsonObject{};
-                    }
-                }
-            }
-        }
-        if (!ReportsDAO::handle(reportId, uid, newStatus, note, err)) return {};
-        return QJsonObject{};
+    if (cmd == cs::cmd::ReportHandle || cmd == cs::cmd::ForceOffReport) {
+        const QString action = cmd == cs::cmd::ForceOffReport ? QStringLiteral("resolved")
+                                                              : p.value("newStatus").toString();
+        const QString state = reportreview::handleReport(p.value("reportId").toInt(), uid,
+                                     action, p.value("note").toString().trimmed(), err);
+        return {{"state", state}};
     }
 
-    if (cmd == cs::cmd::ForceOffReport) {
-        if (!GoodsDAO::forceOffShelfReport(p.value("goodsId").toInt(), err)) return {};
-        return QJsonObject{};
+    if (cmd == cs::cmd::ReviewDecide) {
+        bool restored = false;
+        if (!reportreview::decideReview(p.value("caseId").toInt(), uid, p.value("decision").toString(),
+                                      p.value("reason").toString().trimmed(), restored, err)) return {};
+        return {{"restored", restored}};
     }
 
     if (cmd == cs::cmd::RestoreReport) {
-        if (!GoodsDAO::restoreFromReport(p.value("goodsId").toInt(), err)) return {};
-        return QJsonObject{};
+        reportreview::restoreLegacy(p.value("goodsId").toInt(), uid, p.value("reason").toString().trimmed(), err);
+        return {};
     }
 
     // ---- 交易管理 ----

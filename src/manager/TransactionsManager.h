@@ -65,7 +65,7 @@ private:
      * 托管模式：买家货款从托管直接退回；若该交易无托管记录（旧版数据）会失败
      */
     bool doRefund(int transactionId, const QString &newStatus, const QString &reason,
-                  bool reportOffShelf, QString &errorMsg);
+                  int refundAdminId, QString &errorMsg);
 
     /**
      * @brief 内部：托管结算事务（被 confirmReceived/autoSettleExpired 共用）

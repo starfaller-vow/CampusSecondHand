@@ -203,6 +203,7 @@ bool GoodsManager::offShelf(int goodsId, int operatorId, QString &errorMsg)//`op
     Goods g = GoodsDAO::getById(goodsId);
     if (g.id == 0) { errorMsg = QStringLiteral("商品不存在"); return false; }
     if (g.sellerId != operatorId) { errorMsg = QStringLiteral("无权操作"); return false; }
+    if (!g.isOnSale()) { errorMsg = QStringLiteral("仅在售商品可以主动下架"); return false; }
     return GoodsDAO::setStatus(goodsId, "off_shelf", errorMsg);//`off_shelf`：下架
 }
 
@@ -213,8 +214,12 @@ bool GoodsManager::onShelf(int goodsId, int operatorId, QString &errorMsg)
     if (g.sellerId != operatorId) { errorMsg = QStringLiteral("无权操作"); return false; }
     if (g.isReserved()) { errorMsg = QStringLiteral("商品已被预订，无法上架"); return false; }
     // 被举报下架的商品：卖家不能自行重新上架，只能由管理员在举报中心恢复
-    if (g.isReportOff()) {
-        errorMsg = QStringLiteral("商品因举报被下架，请联系管理员申请恢复");
+    if (g.isReportRestricted()) {
+        errorMsg = QStringLiteral("商品受举报处置限制，请查看我的商品中的处理状态");
+        return false;
+    }
+    if (!g.isOffShelf() && !g.isOnSale()) {
+        errorMsg = QStringLiteral("当前商品状态不可上架");
         return false;
     }
     return GoodsDAO::setStatus(goodsId, "on_sale", errorMsg);//`on_sale`：上架售卖
@@ -239,6 +244,10 @@ bool GoodsManager::deleteGoods(int goodsId, int operatorId, QString &errorMsg)
             errorMsg = QStringLiteral("无权删除该商品");
             return false;
         }
+    }
+    if (g.isReportRestricted() || g.isReserved()) {
+        errorMsg = QStringLiteral("举报处置中或交易中的商品不可删除");
+        return false;
     }
     return GoodsDAO::deleteById(goodsId, errorMsg);
 }

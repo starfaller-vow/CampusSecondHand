@@ -74,6 +74,9 @@ Report ReportsDAO::getById(int id)
         r.reasonType = q.value("reason_type").toString();
         r.description = q.value("description").toString();
         r.status = q.value("status").toString();
+        r.handlerId   = q.value("handler_id").toInt();
+        r.handlerNote = q.value("handler_note").toString();
+        r.handleTime  = q.value("handle_time").toString();
         r.createTime = q.value("create_time").toString();
     }
     return r;

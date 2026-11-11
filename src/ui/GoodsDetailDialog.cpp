@@ -373,10 +373,7 @@ void GoodsDetailDialog::onReportGoods()
 
     auto *typeLabel = new QLabel(QStringLiteral("举报类型："), dlg);
     auto *typeCombo = new QComboBox(dlg);
-    typeCombo->addItem(QStringLiteral("虚假商品"));
-    typeCombo->addItem(QStringLiteral("描述不符"));
-    typeCombo->addItem(QStringLiteral("欺诈行为"));
-    typeCombo->addItem(QStringLiteral("其他"));
+    typeCombo->addItems(cs::goodsReportCategories());
 
     auto *descLabel = new QLabel(QStringLiteral("详细描述（至少10字）："), dlg);
     auto *descEdit = new QTextEdit(dlg);

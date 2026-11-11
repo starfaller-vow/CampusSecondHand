@@ -274,7 +274,62 @@ bool DatabaseManager::applyMigrations(QString &errorMsg)
         }
         qWarning() << "已迁移：goods 表新增 off_reason 列";
     }
-    return true;
+    return execScript(QString::fromUtf8(R"SQL(
+CREATE TABLE IF NOT EXISTS report_dispositions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER UNIQUE REFERENCES reports(id),
+    goods_id INTEGER NOT NULL,
+    seller_id INTEGER NOT NULL REFERENCES users(id),
+    tx_id INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL CHECK (state IN ('awaiting_trade','awaiting_action','down','lifted','closed')),
+    reason TEXT NOT NULL,
+    down_admin_id INTEGER REFERENCES users(id),
+    down_time TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_report_dispositions_goods ON report_dispositions(goods_id, state);
+CREATE INDEX IF NOT EXISTS idx_report_dispositions_trade ON report_dispositions(tx_id, state);
+CREATE INDEX IF NOT EXISTS idx_report_pending_lookup ON reports(reporter_id, target_type, target_id, status);
+
+CREATE TABLE IF NOT EXISTS report_reviews (
+    case_id INTEGER PRIMARY KEY REFERENCES report_dispositions(id),
+    description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied')),
+    create_time TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    handler_id INTEGER REFERENCES users(id),
+    reason TEXT,
+    handle_time TEXT
+);
+CREATE TABLE IF NOT EXISTS report_review_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id INTEGER NOT NULL REFERENCES report_reviews(case_id),
+    content BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_report_review_photos_case ON report_review_photos(case_id);
+
+-- 保留旧版的重复举报记录，只让最早一条继续待处理。
+UPDATE reports AS current
+SET status='duplicate'
+WHERE current.target_type='goods' AND current.status='pending'
+AND EXISTS (
+    SELECT 1 FROM reports first
+    WHERE first.target_type='goods' AND first.status='pending'
+    AND first.reporter_id=current.reporter_id AND first.target_id=current.target_id
+    AND trim(first.reason_type)=trim(current.reason_type) COLLATE NOCASE
+    AND first.id<current.id
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_unique_pending
+ON reports(reporter_id, target_id, trim(reason_type) COLLATE NOCASE)
+WHERE target_type='goods' AND status='pending';
+
+-- 旧版在已付款时允许确认举报，但没有保存处置状态。只关联当前仍在交易、且该次下单后核实的记录。
+INSERT OR IGNORE INTO report_dispositions (report_id, goods_id, seller_id, tx_id, state, reason)
+SELECT r.id, g.id, g.seller_id, t.id, 'awaiting_trade',
+       COALESCE(NULLIF(trim(r.handler_note), ''), '历史举报已核实成立，详细原因待管理员补录')
+FROM reports r
+JOIN goods g ON r.target_type='goods' AND r.target_id=g.id AND g.status='reserved'
+JOIN transactions t ON t.goods_id=g.id AND t.status='paid'
+WHERE r.status='resolved' AND r.handle_time>=t.create_time;
+)SQL"), errorMsg);
 }
 
 bool DatabaseManager::ensureDefaultAdmin(QString &errorMsg)

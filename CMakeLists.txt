@@ -80,13 +80,15 @@ target_include_directories(CampusServer PRIVATE
 target_link_libraries(CampusServer PRIVATE
     Qt6::Core
     Qt6::Sql
+    Qt6::Gui
     Qt6::Network
 )
 
 # ============================================================
 # 运行期 Qt DLL 部署（避免手动运行 exe 时提示找不到 Qt6*.dll）
 # ============================================================
-if(WIN32)
+option(CAMPUS_DEPLOY_QT "Run windeployqt after linking Windows targets" ON)
+if(WIN32 AND CAMPUS_DEPLOY_QT)
     get_target_property(_qt_qmake Qt6::qmake IMPORTED_LOCATION)
     get_filename_component(_qt_bin_dir "${_qt_qmake}" DIRECTORY)
     set(_windeployqt "${_qt_bin_dir}/windeployqt.exe")

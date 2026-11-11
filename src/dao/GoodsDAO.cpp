@@ -242,7 +242,7 @@ bool GoodsDAO::restoreFromReport(int goodsId, QString &errorMsg)
     QSqlQuery q(DatabaseManager::instance().db());
     q.prepare("UPDATE goods SET status = 'on_sale', off_reason = '', "
               "update_time = datetime('now','localtime') "
-              "WHERE id = ? AND off_reason = 'report'");
+              "WHERE id = ? AND status = 'off_shelf' AND off_reason IN ('report','report_pending')");
     q.addBindValue(goodsId);
     if (!q.exec()) {
         errorMsg = q.lastError().text();

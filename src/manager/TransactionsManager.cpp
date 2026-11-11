@@ -1,4 +1,5 @@
 #include "TransactionsManager.h"
+#include "ReportReview.h"
 #include "../dao/TransactionsDAO.h"
 #include "../dao/GoodsDAO.h"
 #include "../dao/UserDAO.h"
@@ -168,7 +169,7 @@ bool TransactionsManager::cancelTransaction(int transactionId, int operatorId,//
 
     QString opName = (operatorId == t.buyerId) ? "买家" : "卖家";//判断是谁发起的取消订单，记录操作人的身份。
     return doRefund(transactionId, "cancelled",
-                    QStringLiteral("%1主动取消交易").arg(opName), false, errorMsg);
+                    QStringLiteral("%1主动取消交易").arg(opName), 0, errorMsg);
 }
 
 // ==================== 管理员强制退款 ====================
@@ -183,13 +184,13 @@ bool TransactionsManager::refundByAdmin(int transactionId, int adminId, QString 
     }
     return doRefund(transactionId, "refunded",
                     QStringLiteral("管理员(id=%1)强制退款（举报/争议处理）").arg(adminId),
-                    true, errorMsg);
+                    adminId, errorMsg);
 }
 
 // ==================== 内部：退款事务（托管模式）====================
 
 bool TransactionsManager::doRefund(int transactionId, const QString &newStatus,
-                                  const QString &reason, bool reportOffShelf,
+                                  const QString &reason, int refundAdminId,
                                   QString &errorMsg)
 {
     Transaction t = TransactionsDAO::getById(transactionId);
@@ -225,14 +226,15 @@ bool TransactionsManager::doRefund(int transactionId, const QString &newStatus,
         return false;
     }
 
-    // 3. 商品状态：协商取消→回到在售；管理员强制退款→举报下架（防卖家重新上架）
-    if (reportOffShelf) {
-        if (!GoodsDAO::forceOffShelfReport(t.goodsId, e)) {
-            rollback(QStringLiteral("商品举报下架失败：") + e);
+    if (refundAdminId > 0) {
+        if (!GoodsDAO::forceOffShelfReport(t.goodsId, e)
+            || !reportreview::finishRefund(t, refundAdminId, e)) {
+            rollback(e);
             return false;
         }
-    } else {
-        GoodsDAO::setStatus(t.goodsId, "on_sale", e);
+    } else if (!reportreview::returnCancelledGoods(t, e)) {
+        rollback(e);
+        return false;
     }
 
     // 4. 写退款流水（托管模式：钱未经过卖家，仅买家有退款流水）
@@ -314,7 +316,7 @@ bool TransactionsManager::settleToDone(int transactionId, const QString &reason,
     }
 
     // 4. 商品 sold + 完成时间
-    if (!GoodsDAO::setStatus(t.goodsId, "sold", e)) {
+    if (!GoodsDAO::setStatus(t.goodsId, "sold", e) || !reportreview::finishSale(t.id, e)) {
         rollback(e);
         return false;
     }
